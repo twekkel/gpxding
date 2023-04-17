@@ -341,6 +341,12 @@ int main(int argc, char *argv[]){
         parseGPXFile(infilename, &points, &num_points, elevation);
 
         // Omit nearby points
+        if (num_points == 0) {
+            fprintf(stderr, "Error: %s does not contain trkpt/trackpoints\n", infilename);
+            exit(1);
+        }
+
+        // Omit nearby points
         if (nearby > 0.0) reduce_nearby(points, num_points, nearby);
 
         // Omit spike points
