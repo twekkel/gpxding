@@ -364,8 +364,8 @@ int main(int argc, char *argv[]){
             stat(outfilename, &filestatus);
             int outsize = filestatus.st_size;
             printf("%s => %s\n", infilename, outfilename);
-            printf("  %i => %i (%.2f%%) trackpoints\n", num_points, num_rdp_points, num_rdp_points * 100.0 / num_points);
-            printf("  %i => %i (%.2f%%) bytes\n", insize, outsize, outsize * 100.0 / insize);
+            printf("%8i => %8i (%.2f%%) trackpoints\n", num_points, num_rdp_points, num_rdp_points * 100.0 / num_points);
+            printf("%8i => %8i (%.2f%%) bytes\n", insize, outsize, outsize * 100.0 / insize);
         }
 
         free(outfilename);
