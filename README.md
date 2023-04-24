@@ -34,5 +34,10 @@ Andorra_la_Vella_Quillan.gpx => Andorra_la_Vella_Quillan.gpx.gpx
   5450286 => 125983 (2.31%) bytes
 ```
 
+### Features
+* very fast (much faster than [gpsbabel](https://www.gpsbabel.org/))
+* process multiple files in a single command
+* supports unlimited file size / track points
+
 ### Caveats
    * in case of a multi tracks gpx file, all tracks will be minified and merged into a single track
