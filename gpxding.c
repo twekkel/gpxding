@@ -352,6 +352,12 @@ int main(int argc, char *argv[]){
         // Omit spike points
         if (spike > 0.0) despike(points, num_points, spike);
 
+        // First and last point can not be the same
+        while (points[0].lat == points[num_points-1].lat &&
+               points[0].lon == points[num_points-1].lon) {
+            num_points--;
+        }
+
         // Simplify using RDP algorithm
         rdp_simplify(points, num_points, epsilon);
 
