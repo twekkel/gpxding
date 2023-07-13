@@ -368,7 +368,7 @@ int main(int argc, char *argv[]){
         // Print statistics
         if (! quiet) {
             int num_rdp_points = 0;
-            for (int rdp = 0; rdp <= num_points; rdp++) {
+            for (int rdp = 0; rdp <= num_points-1; rdp++) {
                 if (points[rdp].rdp) num_rdp_points++;
             }
             stat(infilename, &filestatus);
