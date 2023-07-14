@@ -16,8 +16,8 @@
 #endif
 
 #define VERSION         "0.0.2"
-#define GPXHEADER       "<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx><rte>"
-#define GPXFOOTER       "</rte></gpx>"
+#define GPXHEADER       "<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx><trk><trkseg>"
+#define GPXFOOTER       "</trkseg></trk></gpx>"
 #define NO_ELE          INT_MIN
 #define DIGITS          5
 #define ELEVATION       true
@@ -254,10 +254,10 @@ void writeGPXFile(const GPXPoint* points, int n, char* filename, int digits, boo
                 int lat_digits = num_digits(points[i].lat, digits);
                 int lon_digits = num_digits(points[i].lon, digits);
                 if (elevation && points[i].ele != NO_ELE) {
-                    fprintf(fp, "<rtept lat=\"%.*g\" lon=\"%.*g\"><ele>%i</ele></rtept>",
+                    fprintf(fp, "<trkpt lat=\"%.*g\" lon=\"%.*g\"><ele>%i</ele></trkpt>",
                     lat_digits, points[i].lat, lon_digits, points[i].lon, points[i].ele);
                 } else {
-                    fprintf(fp, "<rtept lat=\"%.*g\" lon=\"%.*g\"></rtept>",
+                    fprintf(fp, "<trkpt lat=\"%.*g\" lon=\"%.*g\"></trkpt>",
                     lat_digits, points[i].lat, lon_digits, points[i].lon);
                 }
             }
