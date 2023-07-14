@@ -12,7 +12,7 @@ make install
 ### Usage
 
 ```
-gpxding version v0.0.2
+gpxding version v0.0.3
 Usage: gpxding [OPTIONS] [FILE ...]
   -d    number of digits (default 5)
   -e    omit elevation info
