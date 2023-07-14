@@ -16,8 +16,9 @@
 #endif
 
 #define VERSION         "0.0.2"
-#define GPXHEADER       "<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx><trk><trkseg>"
-#define GPXFOOTER       "</trkseg></trk></gpx>"
+#define GPXHEADER       "<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx><rte>"
+#define GPXFOOTER       "</rte></gpx>"
+#define NO_ELE          INT_MIN
 #define DIGITS          5
 #define ELEVATION       true
 #define EPSILON         2.0
@@ -98,11 +99,40 @@ xmlDocPtr readGPXFile(const char* filename) {
     return doc;
 }
 
+// Extract the lat,lon and elevation data
+void processNode(GPXPoint** points, xmlNodePtr pt_node, int* num_points, bool elevation) {
+    xmlChar*        content;
+    GPXPoint        point;
+
+    point.lat = atof((const char*)xmlGetProp(pt_node, (const xmlChar*)"lat"));
+    point.lon = atof((const char*)xmlGetProp(pt_node, (const xmlChar*)"lon"));
+    point.ele = NO_ELE;
+    point.rdp = true;
+
+    // Extract the ele(vation) data (if available and desired)
+    if (elevation) {
+        xmlNodePtr ele_node = pt_node->children;
+        while (ele_node != NULL) {
+            if (xmlStrcmp(ele_node->name, (const xmlChar*)"ele") == 0) {
+                content = xmlNodeGetContent(ele_node);
+                point.ele = atoi((const char*)content);
+                xmlFree(content);
+                break;
+            }
+            ele_node = ele_node->next;
+        }
+    }
+
+    // Add the point to the dynamic array
+    *points = (GPXPoint*)realloc(*points, sizeof(GPXPoint) * (*num_points + 1));
+    (*points)[*num_points] = point;
+    (*num_points)++;
+}
+
 // Parse the GPX file and extract the lat,lon and elevation data
 void parseGPXFile(const char* filename, GPXPoint** points, int* num_points, bool elevation) {
     xmlDocPtr       doc;
-    xmlNodePtr      node, trk_node, trkseg_node, trkpt_node;
-    xmlChar*        content;
+    xmlNodePtr      node, trk_node, trkseg_node, pt_node;
 
     doc = readGPXFile(filename);
 
@@ -120,34 +150,17 @@ void parseGPXFile(const char* filename, GPXPoint** points, int* num_points, bool
         if (xmlStrcmp(trk_node->name, (const xmlChar*)"trk") == 0) {
             for (trkseg_node = trk_node->children; trkseg_node != NULL; trkseg_node = trkseg_node->next) {
                 if (xmlStrcmp(trkseg_node->name, (const xmlChar*)"trkseg") == 0) {
-                    for (trkpt_node = trkseg_node->children; trkpt_node != NULL; trkpt_node = trkpt_node->next) {
-                        if (xmlStrcmp(trkpt_node->name, (const xmlChar*)"trkpt") == 0) {
-                            // Extract the lat and lon coordinates
-                            GPXPoint point;
-                            point.lat = atof((const char*)xmlGetProp(trkpt_node, (const xmlChar*)"lat"));
-                            point.lon = atof((const char*)xmlGetProp(trkpt_node, (const xmlChar*)"lon"));
-                            point.rdp = true;
-
-                            // Extract the ele(vation) data (if available and desired)
-                            if (elevation) {
-                                xmlNodePtr ele_node = trkpt_node->children;
-                                while (ele_node != NULL) {
-                                    if (xmlStrcmp(ele_node->name, (const xmlChar*)"ele") == 0) {
-                                        content = xmlNodeGetContent(ele_node);
-                                        point.ele = atoi((const char*)content);
-                                        xmlFree(content);
-                                        break;
-                                    }
-                                    ele_node = ele_node->next;
-                                }
-                            }
-
-                            // Add the point to the dynamic array
-                            *points = (GPXPoint*)realloc(*points, sizeof(GPXPoint) * (*num_points + 1));
-                            (*points)[*num_points] = point;
-                            (*num_points)++;
+                    for (pt_node = trkseg_node->children; pt_node != NULL; pt_node = pt_node->next) {
+                        if (xmlStrcmp(pt_node->name, (const xmlChar*)"trkpt") == 0) {
+                            processNode(points, pt_node, num_points, elevation);
                         }
                     }
+                }
+            }
+        } else if (xmlStrcmp(trk_node->name, (const xmlChar*)"rte") == 0) {
+            for (pt_node = trk_node->children; pt_node != NULL; pt_node = pt_node->next) {
+                if (xmlStrcmp(pt_node->name, (const xmlChar*)"rtept") == 0) {
+                    processNode(points, pt_node, num_points, elevation);
                 }
             }
         }
@@ -240,11 +253,11 @@ void writeGPXFile(const GPXPoint* points, int n, char* filename, int digits, boo
             if (points[i].rdp == true) {
                 int lat_digits = num_digits(points[i].lat, digits);
                 int lon_digits = num_digits(points[i].lon, digits);
-                if (elevation) {
-                    fprintf(fp, "<trkpt lat=\"%.*g\" lon=\"%.*g\"><ele>%i</ele></trkpt>",
+                if (elevation && points[i].ele != NO_ELE) {
+                    fprintf(fp, "<rtept lat=\"%.*g\" lon=\"%.*g\"><ele>%i</ele></rtept>",
                     lat_digits, points[i].lat, lon_digits, points[i].lon, points[i].ele);
                 } else {
-                    fprintf(fp, "<trkpt lat=\"%.*g\" lon=\"%.*g\"></trkpt>",
+                    fprintf(fp, "<rtept lat=\"%.*g\" lon=\"%.*g\"></rtept>",
                     lat_digits, points[i].lat, lon_digits, points[i].lon);
                 }
             }
@@ -342,7 +355,7 @@ int main(int argc, char *argv[]){
 
         // Omit nearby points
         if (num_points == 0) {
-            fprintf(stderr, "Error: %s does not contain trkpt/trackpoints\n", infilename);
+            fprintf(stderr, "Error: %s does not contain rtept/trkpt/trackpoints\n", infilename);
             exit(1);
         }
 
