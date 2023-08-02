@@ -49,9 +49,21 @@ Andorra_la_Vella_Quillan.gpx => Andorra_la_Vella_Quillan.gpx.gpx
 ```
 
 ### Features
-* very fast (much faster than [gpsbabel](https://www.gpsbabel.org/))
-* process multiple files in a single command
-* supports unlimited file size / track points
+* rounding/reducting to a sensible signification number of digits (preserving relevant precision), e.g. an elevation of 14.9999997348 becomes 15.
+* deduplicate nearby point, e.g. when recording wasn't stopped during recording
+* reduced noise
+* very fast (e.g. much faster than [gpsbabel](https://www.gpsbabel.org/))
+* process multiple files with a single command (wildcard support)
+* supports unlimited GPX file sizes / track points (constricted only by memory)
+* typically a GPX file will be reduced to about 10% of the orginal size, without losing relevant information for navigation
+
+### Verified compatibility
+* [Bryton Active](https://play.google.com/store/apps/details?id=com.brytonsport.active)
+* [Garmin Connect](https://play.google.com/store/apps/details?id=com.garmin.android.apps.connectmobile)
+* [gpx.studio](https://gpx.studio)
+* [Strava](https://strava.com)
+* [Suunto App](https://play.google.com/store/apps/details?id=com.stt.android.suunto)
+* ...
 
 ### Caveats
    * in case of a multi tracks gpx file, all tracks will be minified and merged into a single track
