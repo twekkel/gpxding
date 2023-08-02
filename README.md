@@ -4,9 +4,23 @@ Goal of **gpxding** is to have the smallest possible gpx file for route navigati
 
 ### Installation
 
+#### Prerequisites
+
+Libxml2 is a required package for gpxding and installing it depends on the OS installed, e.g.
+
+```
+sudo apt install libxml2-dev
+or
+sudo yum install libxml2-dev
+or
+...
+```
+
+
+#### Build
 ```
 make
-make install
+sudo make install
 ```
 
 ### Usage
