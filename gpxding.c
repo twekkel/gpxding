@@ -16,7 +16,7 @@
 #endif
 
 #define VERSION         "0.0.2"
-#define GPXHEADER       "<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx><trk><trkseg>"
+#define GPXHEADER       "<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx xmlns=\"http://www.topografix.com/GPX/1/1\"><trk><trkseg>"
 #define GPXFOOTER       "</trkseg></trk></gpx>"
 #define NO_ELE          INT_MIN
 #define DIGITS          5
