@@ -26,7 +26,7 @@ sudo make install
 ### Usage
 
 ```
-gpxding version v0.0.3
+gpxding version v0.0.4
 Usage: gpxding [OPTIONS] [FILE ...]
   -d    number of digits (default 5)
   -e    omit elevation info
@@ -40,22 +40,23 @@ Usage: gpxding [OPTIONS] [FILE ...]
 Example
 ```
 $ gpxding *.gpx
-Cierp_Andorra_la_Vella.gpx => Cierp_Andorra_la_Vella.gpx.gpx
-  30443 => 3054 (10.03%) trackpoints
-  8839475 => 183562 (2.08%) bytes
 Andorra_la_Vella_Quillan.gpx => Andorra_la_Vella_Quillan.gpx.gpx
-  18761 => 2088 (11.13%) trackpoints
-  5450286 => 125983 (2.31%) bytes
+   18761 =>     2087 (11.12%) trackpoints
+ 5450286 =>   122161 (2.24%) bytes
+Cierp_Andorra_la_Vella.gpx => Cierp_Andorra_la_Vella.gpx.gpx
+   30443 =>     3054 (10.03%) trackpoints
+ 8839475 =>   177989 (2.01%) bytes
 ```
 
 ### Features
+* typically a GPX file will be reduced to about 10% of the orginal size, without losing relevant information for navigation
+* redude number of trackpoints using Ramer-Douglas-peucker algorithm
 * rounding/reducting to a sensible signification number of digits (preserving relevant precision), e.g. an elevation of 14.9999997348 becomes 15.
-* deduplicate nearby point, e.g. when recording wasn't stopped during recording
-* reduced noise
+* deduplicate nearby points, e.g. recording wasn't stopped during a time-out
+* reduce noise/spikes
 * very fast (e.g. much faster than [gpsbabel](https://www.gpsbabel.org/))
 * process multiple files with a single command (wildcard support)
-* supports unlimited GPX file sizes / track points (constricted only by memory)
-* typically a GPX file will be reduced to about 10% of the orginal size, without losing relevant information for navigation
+* support unlimited GPX file sizes / track points (restricted only by memory)
 
 ### Verified compatibility
 * [Bryton Active](https://play.google.com/store/apps/details?id=com.brytonsport.active)
@@ -63,7 +64,6 @@ Andorra_la_Vella_Quillan.gpx => Andorra_la_Vella_Quillan.gpx.gpx
 * [gpx.studio](https://gpx.studio)
 * [Strava](https://strava.com)
 * [Suunto App](https://play.google.com/store/apps/details?id=com.stt.android.suunto)
-* ...
 
 ### Caveats
    * in case of a multi tracks gpx file, all tracks will be minified and merged into a single track
