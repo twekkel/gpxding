@@ -31,6 +31,7 @@ Usage: gpxding [OPTIONS] [FILE ...]
   -d    number of digits (default 5)
   -e    omit elevation info
   -h    show this help
+  -m    use minimal <gpx> (not compatible with all apps/devices)\n\
   -n    remove nearby points (default disabled)
   -p    precision in meters (default 2.0 m)
   -q    quiet
@@ -61,7 +62,8 @@ Cierp_Andorra_la_Vella.gpx => Cierp_Andorra_la_Vella.gpx.gpx
 
 ### Verified compatibility
 * [Bryton Active](https://play.google.com/store/apps/details?id=com.brytonsport.active)
-* [Garmin Connect](https://play.google.com/store/apps/details?id=com.garmin.android.apps.connectmobile)
+* [Garmin Connect](https://play.google.com/store/apps/details?id=com.garmin.android.apps.connectmobile) (do not use "-m" option)
+* [GPS Visualizer](https://www.gpsvisualizer.com)
 * [gpx.studio](https://gpx.studio)
 * [Strava](https://strava.com)
 * [Suunto App](https://play.google.com/store/apps/details?id=com.stt.android.suunto)

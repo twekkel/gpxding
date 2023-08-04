@@ -16,7 +16,8 @@
 #endif
 
 #define VERSION         "0.0.4"
-#define GPXHEADER       "<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx version=\"1.1\" creator=\"gpxding "VERSION"\" xmlns=\"http://www.topografix.com/GPX/1/1\"><trk><trkseg>"
+#define GPXHEADER_FULL  "<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx version=\"1.1\" creator=\"gpxding "VERSION"\" xmlns=\"http://www.topografix.com/GPX/1/1\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd\"><trk><trkseg>"
+#define GPXHEADER_MIN   "<gpx><trk><trkseg>"
 #define GPXFOOTER       "</trkseg></trk></gpx>"
 #define NO_ELE          INT_MIN
 #define DIGITS          5
@@ -44,6 +45,7 @@ Usage: gpxding [OPTIONS] [FILE ...]\n\
   -d    number of digits (default "STRINGIFY(DIGITS)")\n\
   -e    omit elevation info\n\
   -h    show this help\n\
+  -m    use minimal <gpx> (not compatible with all apps/devices)\n\
   -n    remove nearby points (default disabled)\n\
   -p    precision in meters (default "STRINGIFY(EPSILON)" m)\n\
   -q    quiet\n\
@@ -243,12 +245,12 @@ void rdp_simplify(GPXPoint *points, int n, double epsilon) {
 }
 
 // Write the reduced GPX file
-void writeGPXFile(const GPXPoint* points, int n, char* filename, int digits, bool elevation) {
+void writeGPXFile(const GPXPoint* points, int n, char* filename, int digits, bool elevation, const char* gpxheader) {
     FILE            *fp;
 
     fp = fopen(filename, "w");
     if (fp != NULL) {
-        fprintf(fp, GPXHEADER);
+        fprintf(fp, gpxheader);
         for (int i = 0; i < n; ++i) {
             if (points[i].rdp == true) {
                 int lat_digits = num_digits(points[i].lat, digits);
@@ -279,11 +281,12 @@ int main(int argc, char *argv[]){
     int             digits = DIGITS;
     bool            elevation = ELEVATION;
     double          epsilon = EPSILON;
+    const char*     gpxheader = GPXHEADER_FULL;
     double          nearby = NEARBY;
     bool            quiet = QUIET;
     double          spike = SPIKE;
 
-    while ((param = getopt(argc, argv, "d:ehn:p:qs:")) != -1)
+    while ((param = getopt(argc, argv, "d:ehmn:p:qs:")) != -1)
     switch(param) {
         case 'd':                                   // number of digits
             digits = atoi(optarg) ;
@@ -299,6 +302,9 @@ int main(int argc, char *argv[]){
         case 'h':                                   // help
             help();
             exit(0);
+        case 'm':                                   // use minimal <gpx>
+            gpxheader = GPXHEADER_MIN;
+            break;
         case 'n':                                   // max error in meter
             nearby = atof(optarg) ;
             if ((nearby < 0) || (nearby > 100)) {
@@ -376,7 +382,7 @@ int main(int argc, char *argv[]){
 
         // Write new simplified GPX file
         outfilename = concat(infilename, ".gpx");
-        writeGPXFile(points, num_points, outfilename, digits, elevation);
+        writeGPXFile(points, num_points, outfilename, digits, elevation, gpxheader);
 
         // Print statistics
         if (! quiet) {
