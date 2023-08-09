@@ -46,10 +46,10 @@ Usage: gpxding [OPTIONS] [FILE ...]\n\
   -e    omit elevation info\n\
   -h    show this help\n\
   -m    use minimal <gpx> (not compatible with all apps/devices)\n\
-  -n    remove nearby points (default disabled)\n\
+  -n    remove nearby points (default 0 m, disabled)\n\
   -p    precision in meters (default "STRINGIFY(EPSILON)" m)\n\
   -q    quiet\n\
-  -s    remove spikes (default disabled)\n");
+  -s    remove spikes (default 0, disabled)\n");
 
     return;
 }
@@ -216,7 +216,7 @@ void despike(GPXPoint *points, int n, double epsilon) {
 // Deduplicate nearby points
 void reduce_nearby(GPXPoint *points, int n, double epsilon) {
     for (int i = 0; i < n - 2; i++) {
-        if (distance(points[i], points[i+1]) < epsilon) {
+        if (distance(points[i], points[i + 1]) < epsilon) {
             points[i + 1] = points[i];
         }
     }
