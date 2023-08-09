@@ -224,10 +224,10 @@ void reduce_nearby(GPXPoint *points, int n, double epsilon) {
 
 // Apply Ramer–Douglas–Peucker algorithm to reduce the number of trackpoints
 void rdp_simplify(GPXPoint *points, int n, double epsilon) {
-    int             i, index = 0;
+    int             index = 0;
     double          dmax = 0.0;
 
-    for (i = 1; i < n - 1; i++) {
+    for (int i = 1; i < n - 1; i++) {
         double d = p_distance(points[i], points[0], points[n-1]);
         if (d > dmax) {
             index = i;
@@ -238,14 +238,14 @@ void rdp_simplify(GPXPoint *points, int n, double epsilon) {
         rdp_simplify(points, index + 1, epsilon);
         rdp_simplify(points + index, n - index, epsilon);
     } else {
-        for (i = 1; i < n - 1; i++) {
+        for (int i = 1; i < n - 1; i++) {
             points[i].rdp = false;                    // mark point for removal
         }
     }
 }
 
 // Write the reduced GPX file
-void writeGPXFile(const GPXPoint* points, int n, char* filename, int digits, bool elevation, const char* gpxheader) {
+void writeGPXFile(const GPXPoint* points, int n, const char* filename, int digits, bool elevation, const char* gpxheader) {
     FILE            *fp;
 
     fp = fopen(filename, "w");
