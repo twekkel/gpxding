@@ -1,3 +1,4 @@
+#include <fcntl.h>
 #include <getopt.h>
 #include <libxml/parser.h>
 #include <math.h>
@@ -5,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -15,7 +17,7 @@
 #define M_PI            3.14159265358979323846
 #endif
 
-#define VERSION         "0.0.4"
+#define VERSION         "0.0.5"
 #define GPXHEADER_FULL  "<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx version=\"1.1\" creator=\"gpxding "VERSION"\" xmlns=\"http://www.topografix.com/GPX/1/1\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd\"><trk><trkseg>"
 #define GPXHEADER_MIN   "<gpx><trk><trkseg>"
 #define GPXFOOTER       "</trkseg></trk></gpx>"
@@ -49,7 +51,8 @@ Usage: gpxding [OPTIONS] [FILE ...]\n\
   -n    remove nearby points (default 0 m, disabled)\n\
   -p    precision in meters (default "STRINGIFY(EPSILON)" m)\n\
   -q    quiet\n\
-  -s    remove spikes (default 0, disabled)\n");
+  -s    remove spikes (default 0, disabled)\n\
+  -t    split gpx file into individual tracks\n");
 
     return;
 }
@@ -74,6 +77,103 @@ char* concat(const char *s1, const char *s2)
     strcpy(result, s1);
     strcat(result, s2);
     return result;
+}
+
+char* int2str(int num) {
+    int num_len = snprintf(NULL, 0, "%d", num); // Get the length of the string
+    char *str = (char *)malloc(num_len + 1);
+    snprintf(str, num_len + 1, "%d", num);
+    return str;
+}
+
+
+// Split the GPX file in files with individual tracks
+// Using mmap as this is faster than libxml2
+void splitGPXFile(const char* infilename) {
+
+    int fp = open(infilename, O_RDONLY);
+    if (fp == -1) {
+        fprintf(stderr, "Error: Could not open file\n");
+        exit(1);
+    }
+
+    struct stat file_stat;
+    if (fstat(fp, &file_stat) == -1) {
+        fprintf(stderr, "Error: Could not determine file size\n");
+        close(fp);
+        exit(1);
+    }
+
+    char *file_contents = (char *)mmap(NULL, file_stat.st_size, PROT_READ, MAP_PRIVATE, fp, 0);
+    if (file_contents == MAP_FAILED) {
+        fprintf(stderr, "Error: Could not map into memory\n");
+        close(fp);
+        exit(1);
+    }
+
+    char *trk_start = file_contents;
+    char *header_start = file_contents;
+    char *header_end = NULL;
+    int count = 1;
+
+    // Determine header
+    while (1) {
+        trk_start = strstr(trk_start, "<trk>");
+        if (trk_start == NULL) {
+            break;
+        }
+
+        header_end = trk_start;
+        break;
+    }
+
+    if (header_end == NULL) {
+        printf("No <trk> tag found in the GPX file.\n");
+        exit(1);
+    }
+
+    // Find and split the individual tracks, <trk>...</trk>
+    while (1) {
+        trk_start = strstr(trk_start, "<trk>");
+        if (trk_start == NULL) {
+            break;
+        }
+
+        char *trk_end = strstr(trk_start, "</trk>");
+        if (trk_end == NULL) {
+            break;
+        }
+
+        trk_end += 6; // Move past the </trk> tag.
+
+        char *strcount;
+        char *outfilename;
+        strcount = int2str(count);
+        outfilename = concat(infilename, strcount);
+        outfilename = concat(outfilename, ".gpx");
+        FILE *outfile = fopen(outfilename, "w");
+        if (outfile == NULL) {
+            fprintf(stderr, "Error: Could not open output file\n");
+            munmap(file_contents, file_stat.st_size);
+            close(fp);
+            exit(1);
+        }
+
+        fwrite(header_start, header_end - header_start, 1, outfile);
+        fwrite(trk_start, trk_end - trk_start, 1, outfile);
+        fprintf(outfile, "</gpx>");
+        fclose(outfile);
+
+        trk_start = trk_end;
+        count++;
+    }
+
+    if (count == 0) {
+        printf("No <trk> or </trk> tags found in the GPX file.\n");
+    }
+
+    munmap(file_contents, file_stat.st_size);
+    close(fp);
 }
 
 // Read the GPX file
@@ -285,8 +385,9 @@ int main(int argc, char *argv[]){
     double          nearby = NEARBY;
     bool            quiet = QUIET;
     double          spike = SPIKE;
+    bool            split = false;
 
-    while ((param = getopt(argc, argv, "d:ehmn:p:qs:")) != -1)
+    while ((param = getopt(argc, argv, "d:ehmn:p:qs:t")) != -1)
     switch(param) {
         case 'd':                                   // number of digits
             digits = atoi(optarg) ;
@@ -332,6 +433,9 @@ int main(int argc, char *argv[]){
                 exit(1);
             }
             break;
+        case 't':
+            split = true;
+            break;
         case '?':
             return 1;
         default:
@@ -355,6 +459,12 @@ int main(int argc, char *argv[]){
         int             num_points = 0;
 
         infilename      = argv[i];
+
+        // Parse GPX file, extracting lat, lon and ELEVATION
+        if (split) {
+            splitGPXFile(infilename);
+            break;
+        }
 
         // Parse GPX file, extracting lat, lon and ELEVATION
         parseGPXFile(infilename, &points, &num_points, elevation);

@@ -26,7 +26,7 @@ sudo make install
 ### Usage
 
 ```
-gpxding version v0.0.4
+gpxding version v0.0.5
 Usage: gpxding [OPTIONS] [FILE ...]
   -d    number of digits (default 5)
   -e    omit elevation info
@@ -36,6 +36,7 @@ Usage: gpxding [OPTIONS] [FILE ...]
   -p    precision in meters (default 2.0 m)
   -q    quiet
   -s    remove spikes (default disabled)
+  -t    split gpx file into individual tracks
 ```
 
 Example
@@ -56,6 +57,7 @@ Cierp_Andorra_la_Vella.gpx => Cierp_Andorra_la_Vella.gpx.gpx
 * rounding of elevation to the nearest meter
 * deduplicate nearby points, e.g. recording wasn't stopped during a time-out
 * reducing noise/spikes (optional)
+* split gpx files containing multiple tracks into multiple single track files
 * very, very fast (e.g. much faster than [gpsbabel](https://www.gpsbabel.org/))
 * process multiple files with a single command (wildcard support)
 * support for GPX files of unlimited sizes and number of track points (restricted only by memory)
@@ -69,4 +71,4 @@ Cierp_Andorra_la_Vella.gpx => Cierp_Andorra_la_Vella.gpx.gpx
 * [Suunto App](https://play.google.com/store/apps/details?id=com.stt.android.suunto)
 
 ### Caveats
-   * in case of a multi tracks gpx file, all tracks will be minified and merged into a single track
+   * In case of a multi track gpx file, all tracks will be minified and merged into a single track, however a multi track gpx file can be split using the *-t* option.
