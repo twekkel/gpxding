@@ -52,15 +52,15 @@ Cierp_Andorra_la_Vella.gpx => Cierp_Andorra_la_Vella.gpx.gpx
 
 ### Features
 * typically a GPX file will be reduced to about 10% of the original size, without losing relevant information for navigation
-* reducing the number of track points using Ramer-Douglas-Peucker algorithm
-* reducing longitude/latitude to a sensible amount of digits (preserving relevant precision), e.g. 14.9999997348 becomes 15.
-* rounding elevation to the nearest meter (default) or omit is completely
-* deduplicate nearby points, e.g. recording wasn't stopped during a time-out
+* reduce the number of track points using Ramer-Douglas-Peucker algorithm
+* reduce longitude/latitude to a sensible amount of digits (preserving relevant precision), e.g. 14.9999997348 becomes 15.
+* round elevation to the nearest meter (default) or omit it completely
+* deduplicate nearby points, e.g. a recording wasn't stopped during a time-out
 * reducing noise/spikes
 * split multi track GPX files into multiple single track files
 * very, very fast (e.g. much faster than [gpsbabel](https://www.gpsbabel.org/))
 * process multiple files with a single command (wildcard support)
-* support for GPX files of unlimited sizes and number of track points (restricted only by memory)
+* support for GPX files of unlimited sizes and number of track points (limited only by the amount of available memory)
 
 ### Verified compatibility
 * [Bryton Active](https://play.google.com/store/apps/details?id=com.brytonsport.active)
