@@ -31,7 +31,7 @@ Usage: gpxding [OPTIONS] [FILE ...]
   -d    number of digits (default 5)
   -e    omit elevation info
   -h    show this help
-  -m    use minimal <gpx> (not compatible with all apps/devices)\n\
+  -m    use minimal <gpx> (not compatible with all apps/devices)
   -n    remove nearby points (default disabled)
   -p    precision in meters (default 2.0 m)
   -q    quiet
@@ -54,10 +54,10 @@ Cierp_Andorra_la_Vella.gpx => Cierp_Andorra_la_Vella.gpx.gpx
 * typically a GPX file will be reduced to about 10% of the original size, without losing relevant information for navigation
 * reducing the number of track points using Ramer-Douglas-Peucker algorithm
 * reducing longitude/latitude to a sensible amount of digits (preserving relevant precision), e.g. 14.9999997348 becomes 15.
-* rounding of elevation to the nearest meter
+* rounding elevation to the nearest meter (default) or omit is completely
 * deduplicate nearby points, e.g. recording wasn't stopped during a time-out
-* reducing noise/spikes (optional)
-* split gpx files containing multiple tracks into multiple single track files
+* reducing noise/spikes
+* split multi track GPX files into multiple single track files
 * very, very fast (e.g. much faster than [gpsbabel](https://www.gpsbabel.org/))
 * process multiple files with a single command (wildcard support)
 * support for GPX files of unlimited sizes and number of track points (restricted only by memory)
