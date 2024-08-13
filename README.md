@@ -62,13 +62,14 @@ Cierp_Andorra_la_Vella.gpx => Cierp_Andorra_la_Vella.gpx.gpx
 * process multiple files with a single command (wildcard support)
 * support for GPX files of unlimited sizes and number of track points (limited only by the amount of available memory)
 
-### Verified compatibility
+### Compatibility
 * [Bryton Active](https://play.google.com/store/apps/details?id=com.brytonsport.active)
 * [Garmin Connect](https://play.google.com/store/apps/details?id=com.garmin.android.apps.connectmobile) (do not use "-m" option)
 * [GPS Visualizer](https://www.gpsvisualizer.com)
 * [gpx.studio](https://gpx.studio)
 * [Strava](https://strava.com)
 * [Suunto App](https://play.google.com/store/apps/details?id=com.stt.android.suunto)
+* and many others
 
 ### Caveats
-   * In case of a multi track gpx file, all tracks will be minified and merged into a single track, however a multi track gpx file can be split using the *-t* option.
+   * In case of a GPX file with multiple tracks, all tracks will be reduced in size and merged into one track. However, a GPX file with multiple tracks can be split beforehand with the -t option.
