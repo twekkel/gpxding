@@ -350,7 +350,7 @@ void writeGPXFile(const GPXPoint* points, int n, const char* filename, int digit
 
     fp = fopen(filename, "w");
     if (fp != NULL) {
-        fprintf(fp, gpxheader);
+        fputs(gpxheader, fp);
         for (int i = 0; i < n; ++i) {
             if (points[i].rdp == true) {
                 int lat_digits = num_digits(points[i].lat, digits);
