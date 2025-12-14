@@ -1,3 +1,10 @@
+Note for Ubuntu 25.10 (and probably others distributions)... when you get the error 'error while loading shared libraries: libxml2.so.2', use this workaround
+
+```sudo ln -sf /lib/x86_64-linux-gnu/libxml2.so.16 /lib/x86_64-linux-gnu/libxml2.so.2```
+
+===
+
+
 **gpxding** (_ding_ translates into _thing_ in English) is a utility to minify GPX files by removing redundant information. Only (a reduced number of) track points and elevation (optional) information is retained, while all other excess information is discarded. File size will be drastically reduced, while still accurate and useful for route navigation.
 
 The goal of **gpxding** is to have the smallest possible GPX file for route navigation.
