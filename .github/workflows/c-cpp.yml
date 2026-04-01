@@ -13,5 +13,5 @@ jobs:
 
     steps:
     - uses: actions/checkout@v5
-    - name: make -lxml2 -lm
+    - name: make
       run: make
