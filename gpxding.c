@@ -527,7 +527,8 @@ int main(int argc, char *argv[]){
         if (spike > 0.0) despike(points, num_points, spike);
 
         // First and last point can not be the same
-        while (points[0].lat == points[num_points-1].lat &&
+        while (num_points > 1 &&
+               points[0].lat == points[num_points-1].lat &&
                points[0].lon == points[num_points-1].lon) {
             num_points--;
         }
