@@ -11,7 +11,7 @@ STRIP   ?= strip -s
 all: gpxding
 
 gpxding: gpxding.c
-	$(CC) $(CFLAGS) $(LDFLAGS) -o gpxding gpxding.c -lm
+	$(CC) $(CFLAGS) $(LDFLAGS) -o gpxding gpxding.c
 
 install: all
 	$(STRIP) gpxding

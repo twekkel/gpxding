@@ -4,7 +4,7 @@ The goal of **gpxding** is to have the smallest possible GPX file for route navi
 
 ### Installation
 
-gpxding has no dependencies beyond a C compiler and libm.
+gpxding has no dependencies beyond a C compiler (libc only, no libm).
 
 #### Build
 ```
@@ -15,7 +15,7 @@ sudo make install
 ### Usage
 
 ```
-gpxding version v1.0.0
+gpxding version v1.1.0
 Usage: gpxding [OPTIONS] [FILE ...]
   -d    number of digits (default 5)
   -e    omit elevation info
@@ -41,7 +41,7 @@ Cierp_Andorra_la_Vella.gpx => Cierp_Andorra_la_Vella.gpx.gpx
 
 ### Features
 * typically a GPX file will be reduced to about 10% of the original size, without losing relevant information for navigation
-* reduce the number of track points using Ramer-Douglas-Peucker algorithm
+* reduce the number of track points using Lang sliding-window algorithm (streaming)
 * reduce longitude/latitude to a sensible amount of digits (preserving relevant precision), e.g. 14.9999997348 becomes 15.
 * keep elevation in whole meters (or omit it completely with -e)
 * deduplicate nearby points, e.g. a recording wasn't stopped during a time-out
