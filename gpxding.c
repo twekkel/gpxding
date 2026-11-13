@@ -1,15 +1,11 @@
 #include <ctype.h>
-#include <fcntl.h>
 #include <getopt.h>
-#include <limits.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #define _STRINGIFY(s)   #s
 #define STRINGIFY(s)    _STRINGIFY(s)
@@ -82,103 +78,6 @@ char* concat(const char *s1, const char *s2)
     return result;
 }
 
-char* int2str(int num) {
-    int num_len = snprintf(NULL, 0, "%d", num); // Get the length of the string
-    char *str = (char *)malloc(num_len + 1);
-    snprintf(str, num_len + 1, "%d", num);
-    return str;
-}
-
-
-// Split the GPX file in files with individual tracks
-// Using mmap as this is faster than libxml2
-void splitGPXFile(const char* infilename) {
-
-    int fp = open(infilename, O_RDONLY);
-    if (fp == -1) {
-        fprintf(stderr, "Error: Could not open file\n");
-        exit(1);
-    }
-
-    struct stat file_stat;
-    if (fstat(fp, &file_stat) == -1) {
-        fprintf(stderr, "Error: Could not determine file size\n");
-        close(fp);
-        exit(1);
-    }
-
-    char *file_contents = (char *)mmap(NULL, file_stat.st_size, PROT_READ, MAP_PRIVATE, fp, 0);
-    if (file_contents == MAP_FAILED) {
-        fprintf(stderr, "Error: Could not map into memory\n");
-        close(fp);
-        exit(1);
-    }
-
-    char *trk_start = file_contents;
-    char *header_start = file_contents;
-    char *header_end = NULL;
-    int count = 1;
-
-    // Determine header
-    while (1) {
-        trk_start = strstr(trk_start, "<trk>");
-        if (trk_start == NULL) {
-            break;
-        }
-
-        header_end = trk_start;
-        break;
-    }
-
-    if (header_end == NULL) {
-        printf("No <trk> tag found in the GPX file.\n");
-        exit(1);
-    }
-
-    // Find and split the individual tracks, <trk>...</trk>
-    while (1) {
-        trk_start = strstr(trk_start, "<trk>");
-        if (trk_start == NULL) {
-            break;
-        }
-
-        char *trk_end = strstr(trk_start, "</trk>");
-        if (trk_end == NULL) {
-            break;
-        }
-
-        trk_end += 6; // Move past the </trk> tag.
-
-        char *strcount;
-        char *outfilename;
-        strcount = int2str(count);
-        outfilename = concat(infilename, strcount);
-        outfilename = concat(outfilename, ".gpx");
-        FILE *outfile = fopen(outfilename, "w");
-        if (outfile == NULL) {
-            fprintf(stderr, "Error: Could not open output file\n");
-            munmap(file_contents, file_stat.st_size);
-            close(fp);
-            exit(1);
-        }
-
-        fwrite(header_start, header_end - header_start, 1, outfile);
-        fwrite(trk_start, trk_end - trk_start, 1, outfile);
-        fprintf(outfile, "</gpx>");
-        fclose(outfile);
-
-        trk_start = trk_end;
-        count++;
-    }
-
-    if (count == 0) {
-        printf("No <trk> or </trk> tags found in the GPX file.\n");
-    }
-
-    munmap(file_contents, file_stat.st_size);
-    close(fp);
-}
-
 // Read the whole file into a NUL-terminated buffer
 static char* readFile(const char* filename) {
     FILE            *fp;
@@ -198,6 +97,58 @@ static char* readFile(const char* filename) {
     buf[file_stat.st_size] = '\0';
     fclose(fp);
     return buf;
+}
+
+// Split the GPX file in files with individual tracks
+static void splitGPXFile(const char* infilename) {
+    char *file_contents = readFile(infilename);
+    char *header_start = file_contents;
+    char *trk_start = strstr(file_contents, "<trk>");
+
+    if (trk_start == NULL) {
+        printf("No <trk> tag found in the GPX file.\n");
+        free(file_contents);
+        exit(1);
+    }
+
+    char *header_end = trk_start;
+    int count = 1;
+
+    // Find and split the individual tracks, <trk>...</trk>
+    while (trk_start != NULL) {
+        char *trk_end = strstr(trk_start, "</trk>");
+        if (trk_end == NULL) {
+            break;
+        }
+
+        trk_end += 6; // Move past the </trk> tag.
+
+        char *outfilename = malloc(strlen(infilename) + 16);
+        if (outfilename == NULL) {
+            fprintf(stderr, "Error: Out of memory\n");
+            free(file_contents);
+            exit(1);
+        }
+        snprintf(outfilename, strlen(infilename) + 16, "%s%d.gpx", infilename, count);
+        FILE *outfile = fopen(outfilename, "w");
+        if (outfile == NULL) {
+            fprintf(stderr, "Error: Could not open output file\n");
+            free(outfilename);
+            free(file_contents);
+            exit(1);
+        }
+
+        fwrite(header_start, header_end - header_start, 1, outfile);
+        fwrite(trk_start, trk_end - trk_start, 1, outfile);
+        fprintf(outfile, "</gpx>");
+        fclose(outfile);
+        free(outfilename);
+
+        trk_start = strstr(trk_end, "<trk>");
+        count++;
+    }
+
+    free(file_contents);
 }
 
 // Extract a numeric attribute from the attribute list [attrs, attrs_end) of an
