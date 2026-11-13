@@ -295,32 +295,45 @@ static void parseGPXFile(const char* filename, GPXPoint** points, int* num_point
                 continue;
             }
 
-            // Extract the ele(vation) data (if available and desired), bounded
-            // by this element's closing tag or the next point tag
+            // Extract the ele(vation) data (if available and desired): walk the
+            // child tags of this element up to its closing tag, looking for <ele>.
+            // Bounded per point, so total parsing stays O(file size).
             if (elevation && !self_closing) {
-                char close[64];
-                snprintf(close, sizeof(close), "</%.*s", (int)(q - name), name);
-                const char *seg_end = strstr(gt + 1, close);
-                const char *next_pt = strstr(gt + 1, "<trkpt");
-                const char *next_rte = strstr(gt + 1, "<rtept");
-                if (next_pt != NULL && (seg_end == NULL || next_pt < seg_end)) seg_end = next_pt;
-                if (next_rte != NULL && (seg_end == NULL || next_rte < seg_end)) seg_end = next_rte;
-                if (seg_end == NULL) seg_end = gt + strlen(gt);
-                const char *ele = strstr(gt + 1, "<ele");
-                if (ele != NULL && ele < seg_end &&
-                    (ele[4] == '>' || ele[4] == '/' || isspace((unsigned char)ele[4]))) {
-                    const char *content = strchr(ele + 4, '>');
-                    const char *ele_end = strstr(ele, "</ele>");
-                    if (content != NULL && ele_end != NULL && content < ele_end && ele_end < seg_end) {
-                        char buf[64];
-                        size_t n = (size_t)(ele_end - content - 1);
-                        if (n > sizeof(buf) - 1) n = sizeof(buf) - 1;
-                        memcpy(buf, content + 1, n);
-                        buf[n] = '\0';
-                        char *endptr;
-                        point.ele = strtod(buf, &endptr);
-                        point.has_ele = endptr != buf;
+                const char *c = gt + 1;
+                while ((c = strchr(c, '<')) != NULL) {
+                    const char *t = c + 1;
+                    if (*t == '/') {                            // closing tag
+                        const char *cn = t + 1;
+                        while (isalnum((unsigned char)*cn) || *cn == ':' || *cn == '_' || *cn == '-' || *cn == '.')
+                            cn++;
+                        const char *cl = memchr(t + 1, ':', cn - (t + 1));
+                        cl = (cl != NULL) ? cl + 1 : t + 1;
+                        if ((size_t)(cn - cl) == local_len && memcmp(cl, local, local_len) == 0)
+                            break;                              // closes this point element
+                        const char *e = strchr(t, '>');
+                        if (e == NULL) break;
+                        c = e;
+                        continue;
                     }
+                    if (strncmp(t, "ele", 3) == 0 &&
+                        (t[3] == '>' || t[3] == '/' || isspace((unsigned char)t[3]))) {
+                        const char *content = strchr(t + 3, '>');
+                        const char *ele_end = strstr(t, "</ele>");
+                        if (content != NULL && ele_end != NULL && content < ele_end) {
+                            char buf[64];
+                            size_t n = (size_t)(ele_end - content - 1);
+                            if (n > sizeof(buf) - 1) n = sizeof(buf) - 1;
+                            memcpy(buf, content + 1, n);
+                            buf[n] = '\0';
+                            char *endptr;
+                            point.ele = strtod(buf, &endptr);
+                            point.has_ele = endptr != buf;
+                        }
+                        break;
+                    }
+                    const char *e = strchr(t, '>');
+                    if (e == NULL) break;
+                    c = e;
                 }
             }
 
