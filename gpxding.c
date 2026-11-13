@@ -18,7 +18,6 @@
 #define GPXHEADER_FULL  "<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx version=\"1.1\" creator=\"gpxding "VERSION"\" xmlns=\"http://www.topografix.com/GPX/1/1\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd\"><trk><trkseg>"
 #define GPXHEADER_MIN   "<gpx><trk><trkseg>"
 #define GPXFOOTER       "</trkseg></trk></gpx>"
-#define NO_ELE          INT_MIN
 #define DIGITS          5
 #define ELEVATION       true
 #define EPSILON         2.0
@@ -33,7 +32,8 @@
 typedef struct GPXPoint {
     double lat;
     double lon;
-    int    ele;
+    double ele;
+    bool   has_ele;
     bool   rdp;
 } GPXPoint;
 
@@ -178,8 +178,9 @@ static bool get_attr(const char* attrs, const char* attrs_end, const char* name,
             if (n > sizeof(buf) - 1) n = sizeof(buf) - 1;
             memcpy(buf, av, n);
             buf[n] = '\0';
-            *out = strtod(buf, NULL);
-            return true;
+            char *endptr;
+            *out = strtod(buf, &endptr);
+            return endptr != buf;                              // false if not numeric
         }
         if (attrs < attrs_end) attrs++;                         // skip closing quote
     }
@@ -193,6 +194,7 @@ static void parseGPXFile(const char* filename, GPXPoint** points, int* num_point
     char            *xml = readFile(filename);
     const char      *p = xml;
     int             capacity = 0;
+    int             skipped = 0;
 
     *points = NULL;
     *num_points = 0;
@@ -244,12 +246,20 @@ static void parseGPXFile(const char* filename, GPXPoint** points, int* num_point
 
         if (is_pt) {
             GPXPoint point;
-            point.lat = 0.0;
-            point.lon = 0.0;
-            point.ele = NO_ELE;
+            point.ele = 0.0;
+            point.has_ele = false;
             point.rdp = true;
-            get_attr(q, gt, "lat", &point.lat);
-            get_attr(q, gt, "lon", &point.lon);
+            // A point without valid lat/lon (missing, non-numeric or out of
+            // range) must not silently become 0.0 (Null Island); skip it
+            bool valid = get_attr(q, gt, "lat", &point.lat) &&
+                         get_attr(q, gt, "lon", &point.lon) &&
+                         point.lat >= -90.0 && point.lat <= 90.0 &&
+                         point.lon >= -180.0 && point.lon <= 180.0;
+            if (!valid) {
+                skipped++;
+                p = gt + 1;
+                continue;
+            }
 
             // Extract the ele(vation) data (if available and desired), bounded
             // by this element's closing tag or the next point tag
@@ -273,7 +283,9 @@ static void parseGPXFile(const char* filename, GPXPoint** points, int* num_point
                         if (n > sizeof(buf) - 1) n = sizeof(buf) - 1;
                         memcpy(buf, content + 1, n);
                         buf[n] = '\0';
-                        point.ele = atoi(buf);
+                        char *endptr;
+                        point.ele = strtod(buf, &endptr);
+                        point.has_ele = endptr != buf;
                     }
                 }
             }
@@ -292,6 +304,10 @@ static void parseGPXFile(const char* filename, GPXPoint** points, int* num_point
         p = gt + 1;
     }
 
+    if (skipped > 0) {
+        fprintf(stderr, "Warning: %s: skipped %d point(s) with missing or invalid lat/lon\n",
+                filename, skipped);
+    }
     free(xml);
 }
 
@@ -376,12 +392,14 @@ void writeGPXFile(const GPXPoint* points, int n, const char* filename, int digit
         fputs(gpxheader, fp);
         for (int i = 0; i < n; ++i) {
             if (points[i].rdp == true) {
-                if (elevation && points[i].ele != NO_ELE) {
+                if (elevation && points[i].has_ele) {
                     fputs("<trkpt lat=\"", fp);
                     print_coord(fp, points[i].lat, digits);
                     fputs("\" lon=\"", fp);
                     print_coord(fp, points[i].lon, digits);
-                    fprintf(fp, "\"><ele>%i</ele></trkpt>", points[i].ele);
+                    fputs("\"><ele>", fp);
+                    print_coord(fp, points[i].ele, digits);
+                    fputs("</ele></trkpt>", fp);
                 } else {
                     fputs("<trkpt lat=\"", fp);
                     print_coord(fp, points[i].lat, digits);
