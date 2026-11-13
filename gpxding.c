@@ -5,40 +5,39 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 #define _STRINGIFY(s)   #s
 #define STRINGIFY(s)    _STRINGIFY(s)
 
-#ifndef M_PI
-#define M_PI            3.14159265358979323846
-#endif
-
-#define VERSION         "0.9.0"
+#define VERSION         "1.0.0"
 #define GPXHEADER_FULL  "<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx version=\"1.1\" creator=\"gpxding "VERSION"\" xmlns=\"http://www.topografix.com/GPX/1/1\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd\"><trk><trkseg>"
 #define GPXHEADER_MIN   "<gpx><trk><trkseg>"
 #define GPXFOOTER       "</trkseg></trk></gpx>"
 #define DIGITS          5
-#define ELEVATION       true
 #define EPSILON         2.0
 #define NEARBY          0.0
-#define QUIET           false
 #define SPIKE           0.0
 
-#define EARTH_RADIUS    6371008.8                   // arithmetic mean radius
-#define MPERLAT         EARTH_RADIUS * 2 * M_PI / 360
+#define PI              3.14159265358979323846
+#define MPERDEG         (6371008.8 * PI / 180)      // meters per degree latitude
 
-
-typedef struct GPXPoint {
-    double lat;
-    double lon;
-    double ele;
+typedef struct {
+    double lat, lon;
+    long   ele;                                 // whole meters, truncated
     bool   has_ele;
-    bool   rdp;
-} GPXPoint;
+} Point;
 
-// Print help page
-static void help() {
+typedef struct {
+    Point  *pts;
+    size_t n, cap;
+} Track;
+
+static void die(const char *msg, const char *name) {
+    fprintf(stderr, "Error: %s%s%s\n", msg, name ? ": " : "", name ? name : "");
+    exit(1);
+}
+
+static void help(void) {
     puts("gpxding version v"VERSION"\n\
 Usage: gpxding [OPTIONS] [FILE ...]\n\
   -d    number of digits (default "STRINGIFY(DIGITS)")\n\
@@ -48,562 +47,350 @@ Usage: gpxding [OPTIONS] [FILE ...]\n\
   -n    remove nearby points (default 0 m, disabled)\n\
   -p    precision in meters (default "STRINGIFY(EPSILON)" m)\n\
   -q    quiet\n\
-  -s    remove spikes (default 0, disabled)\n\
+  -s    remove spikes in meters (default 0 m, disabled)\n\
   -t    split gpx file into individual tracks\n");
-
-    return;
 }
 
-// Print a coordinate with a fixed number of decimals, stripping trailing
-// zeros. %g is not used: it falls back to scientific notation for small
-// values (e.g. 1e-05), which is invalid in GPX (lat/lon are xsd:decimal)
-static void print_coord(FILE *fp, double v, int digits) {
-    char buf[64];
-    snprintf(buf, sizeof(buf), "%.*f", digits, v);
-    char *dot = strchr(buf, '.');
-    if (dot != NULL) {
-        char *e = buf + strlen(buf) - 1;
-        while (e > dot && *e == '0') *e-- = '\0';
-        if (*e == '.') *e = '\0';
-    }
-    fputs(buf, fp);
-}
-
-// Concatenate strings
-char* concat(const char *s1, const char *s2)
-{
-    char *result = malloc(strlen(s1) + strlen(s2) + 1);
-    strcpy(result, s1);
-    strcat(result, s2);
-    return result;
-}
-
-// Read the whole file into a NUL-terminated buffer
-static char* readFile(const char* filename) {
-    FILE            *fp;
-    struct stat     file_stat;
-    char            *buf;
-
-    if (stat(filename, &file_stat) == -1 || (fp = fopen(filename, "rb")) == NULL) {
-        fprintf(stderr, "Error: Could not open file %s\n", filename);
-        exit(1);
-    }
-    buf = malloc(file_stat.st_size + 1);
-    if (buf == NULL || fread(buf, 1, file_stat.st_size, fp) != (size_t)file_stat.st_size) {
-        fprintf(stderr, "Error: Could not read file %s\n", filename);
-        fclose(fp);
-        exit(1);
-    }
-    buf[file_stat.st_size] = '\0';
+static char *read_file(const char *name, size_t *len) {
+    FILE *fp = fopen(name, "rb");
+    if (!fp) die("could not open", name);
+    fseek(fp, 0, SEEK_END);
+    long size = ftell(fp);
+    rewind(fp);
+    char *buf = size >= 0 ? malloc((size_t)size + 1) : NULL;
+    if (!buf || fread(buf, 1, (size_t)size, fp) != (size_t)size) die("could not read", name);
     fclose(fp);
+    buf[size] = '\0';
+    if (len) *len = (size_t)size;
     return buf;
 }
 
-// If q (just after '<') starts a comment, CDATA section, processing
-// instruction or DOCTYPE, return a pointer just past its terminator,
-// else NULL. CDATA ends at "]]>", so a '>' inside it is not mistaken
-// for the end of the section.
-static const char* skip_special(const char *q) {
-    if (strncmp(q, "!--", 3) == 0) {
-        const char *e = strstr(q, "-->");
-        return (e != NULL) ? e + 3 : q + strlen(q);
-    }
-    if (strncmp(q, "![CDATA[", 8) == 0) {
-        const char *e = strstr(q, "]]>");
-        return (e != NULL) ? e + 3 : q + strlen(q);
-    }
-    if (*q == '?' || *q == '!') {
-        const char *e = strchr(q, '>');
-        return (e != NULL) ? e + 1 : q + strlen(q);
+// ---------------------------------------------------------------- parsing
+
+// If q (just after '<') starts a comment, CDATA, PI or DOCTYPE, return the
+// position after its end, else NULL
+static const char *skip_special(const char *q) {
+    const char *end = NULL, *term = NULL;
+    if (!strncmp(q, "!--", 3))          term = "-->";
+    else if (!strncmp(q, "![CDATA[", 8)) term = "]]>";
+    else if (*q == '?' || *q == '!')    term = ">";
+    else return NULL;
+    end = strstr(q, term);
+    return end ? end + strlen(term) : q + strlen(q);
+}
+
+// End of an open tag starting at q, ignoring '>' inside quoted values
+static const char *tag_end(const char *q) {
+    char quote = 0;
+    for (; *q; q++) {
+        if (quote) { if (*q == quote) quote = 0; }
+        else if (*q == '"' || *q == '\'') quote = *q;
+        else if (*q == '>') return q;
     }
     return NULL;
 }
 
-// Find the next '<' followed by name (e.g. "trk>"), skipping comments and
-// CDATA sections so markup inside them is never matched
-static const char* next_tag(const char *p, const char *name) {
-    size_t name_len = strlen(name);
-    while ((p = strchr(p, '<')) != NULL) {
-        const char *q = p + 1;
-        const char *after = skip_special(q);
-        if (after != NULL) {
-            p = after;
-            continue;
-        }
-        if (strncmp(q, name, name_len) == 0) {
-            return p;
-        }
-        p = q;
-    }
-    return NULL;
+static bool is_name_char(char c) {
+    return isalnum((unsigned char)c) || c == ':' || c == '_' || c == '-' || c == '.';
 }
 
-// Split the GPX file in files with individual tracks
-static void splitGPXFile(const char* infilename) {
-    char *file_contents = readFile(infilename);
-    char *header_start = file_contents;
-    const char *trk_start = next_tag(file_contents, "trk>");
-
-    if (trk_start == NULL) {
-        printf("No <trk> tag found in the GPX file.\n");
-        free(file_contents);
-        exit(1);
-    }
-
-    const char *header_end = trk_start;
-    int count = 1;
-
-    // Find and split the individual tracks, <trk>...</trk>
-    while (trk_start != NULL) {
-        const char *trk_end = next_tag(trk_start, "/trk>");
-        if (trk_end == NULL) {
-            break;
-        }
-
-        trk_end += 6; // Move past the </trk> tag.
-
-        char *outfilename = malloc(strlen(infilename) + 16);
-        if (outfilename == NULL) {
-            fprintf(stderr, "Error: Out of memory\n");
-            free(file_contents);
-            exit(1);
-        }
-        snprintf(outfilename, strlen(infilename) + 16, "%s%d.gpx", infilename, count);
-        FILE *outfile = fopen(outfilename, "w");
-        if (outfile == NULL) {
-            fprintf(stderr, "Error: Could not open output file\n");
-            free(outfilename);
-            free(file_contents);
-            exit(1);
-        }
-
-        fwrite(header_start, header_end - header_start, 1, outfile);
-        fwrite(trk_start, trk_end - trk_start, 1, outfile);
-        fprintf(outfile, "</gpx>");
-        fclose(outfile);
-        free(outfilename);
-
-        trk_start = next_tag(trk_end, "trk>");
-        count++;
-    }
-
-    free(file_contents);
-}
-
-// Extract a numeric attribute from the attribute list [attrs, attrs_end) of an
-// open tag. Handles arbitrary attribute order, whitespace around '=' and both
-// quote styles. The value is copied to a small buffer because strtod needs a
-// NUL-terminated string; 63 chars is far beyond double precision for a coordinate.
-static bool get_attr(const char* attrs, const char* attrs_end, const char* name, double* out) {
-    size_t          name_len = strlen(name);
-
-    while (attrs < attrs_end) {
-        while (attrs < attrs_end && isspace((unsigned char)*attrs)) attrs++;
-        if (attrs >= attrs_end) break;
-        const char *an = attrs;
-        while (attrs < attrs_end && *attrs != '=' && !isspace((unsigned char)*attrs)) attrs++;
-        size_t an_len = attrs - an;
-        while (attrs < attrs_end && isspace((unsigned char)*attrs)) attrs++;
-        if (attrs >= attrs_end || *attrs != '=') continue;      // attribute without value
-        attrs++;
-        while (attrs < attrs_end && isspace((unsigned char)*attrs)) attrs++;
-        if (attrs >= attrs_end || (*attrs != '"' && *attrs != '\'')) continue;
-        char quote = *attrs++;
-        const char *av = attrs;
-        while (attrs < attrs_end && *attrs != quote) attrs++;
-        if (an_len == name_len && memcmp(an, name, name_len) == 0) {
-            char buf[64];
-            size_t n = (size_t)(attrs - av);
-            if (n > sizeof(buf) - 1) n = sizeof(buf) - 1;
-            memcpy(buf, av, n);
-            buf[n] = '\0';
-            char *endptr;
-            *out = strtod(buf, &endptr);
-            return endptr != buf;                              // false if not numeric
-        }
-        if (attrs < attrs_end) attrs++;                         // skip closing quote
+// Numeric attribute (any order, spacing and quote style) of the tag [a, end)
+static bool get_attr(const char *a, const char *end, const char *name, double *out) {
+    size_t len = strlen(name);
+    for (; a < end; a++) {
+        if (!isspace((unsigned char)a[-1]) || strncmp(a, name, len)) continue;
+        const char *v = a + len;
+        while (isspace((unsigned char)*v)) v++;
+        if (*v++ != '=') continue;
+        while (isspace((unsigned char)*v)) v++;
+        if (*v != '"' && *v != '\'') continue;
+        char *e;
+        *out = strtod(v + 1, &e);
+        return e != v + 1 && *e == *v;
     }
     return false;
 }
 
-// Parse the GPX file and extract the lat,lon and elevation data.
-// Single pass over the raw text: no XML library, just enough parsing for
-// trkpt/rtept tags. Not 100% XML compliant, but sufficient for real GPX files.
-static void parseGPXFile(const char* filename, GPXPoint** points, int* num_points, bool elevation) {
-    char            *xml = readFile(filename);
-    const char      *p = xml;
-    int             capacity = 0;
-    int             skipped = 0;
+static void add_point(Track *t, Point p) {
+    if (t->n == t->cap) {
+        t->cap = t->cap ? t->cap * 2 : 1024;
+        t->pts = realloc(t->pts, t->cap * sizeof(Point));
+        if (!t->pts) die("out of memory", NULL);
+    }
+    t->pts[t->n++] = p;
+}
 
-    *points = NULL;
-    *num_points = 0;
+// Collect all trkpt and rtept elements (any namespace prefix)
+static void parse_points(const char *xml, Track *t, bool elevation, const char *name) {
+    int skipped = 0;
+    for (const char *p = xml; (p = strchr(p, '<')); ) {
+        const char *q = p + 1, *after = skip_special(q);
+        if (after) { p = after; continue; }
+        const char *n = q;
+        while (is_name_char(*q)) q++;
+        if (*n == '/') { p = q; continue; }
+        const char *gt = tag_end(q);
+        if (!gt) break;
+        const char *colon = memchr(n, ':', q - n), *local = colon ? colon + 1 : n;
+        size_t len = q - local;
+        p = gt + 1;
+        if (len != 5 || (memcmp(local, "trkpt", 5) && memcmp(local, "rtept", 5))) continue;
 
-    while ((p = strchr(p, '<')) != NULL) {
-        const char *q = p + 1;
+        Point pt = {0, 0, 0, false};
+        if (!get_attr(q, gt, "lat", &pt.lat) || !get_attr(q, gt, "lon", &pt.lon) ||
+            !(fabs(pt.lat) <= 90) || !(fabs(pt.lon) <= 180)) { skipped++; continue; }
 
-        // Skip comments, CDATA, processing instructions and DOCTYPE
-        const char *after = skip_special(q);
-        if (after != NULL) {
-            p = after;
-            continue;
-        }
-        if (*q == '/') {                                        // closing tag
-            p = q + 1;
-            continue;
-        }
-
-        // Tag name, possibly namespace prefixed
-        const char *name = q;
-        while (*q != '\0' && (isalnum((unsigned char)*q) || *q == ':' || *q == '_' || *q == '-' || *q == '.'))
-            q++;
-        const char *colon = memchr(name, ':', q - name);
-        const char *local = (colon != NULL) ? colon + 1 : name;
-        size_t local_len = q - local;
-        bool is_pt = local_len == 5 &&
-                     (memcmp(local, "trkpt", 5) == 0 || memcmp(local, "rtept", 5) == 0);
-
-        // Find the end of the open tag, ignoring '>' inside quoted attribute values
-        const char *gt = q;
-        char quote = '\0';
-        while (*gt != '\0') {
-            if (quote != '\0') {
-                if (*gt == quote) quote = '\0';
-            } else if (*gt == '"' || *gt == '\'') {
-                quote = *gt;
-            } else if (*gt == '>') {
+        // <ele> is the first child: search a bounded window up to the closing tag
+        if (elevation && gt[-1] != '/') {
+            const char *nul = memchr(p, '\0', 1024), *end = nul ? nul : p + 1024;
+            for (const char *e = p; e < end && strncmp(e, "pt>", 3); e++) {
+                if (strncmp(e, "ele>", 4) || (e[-1] != '<' && e[-1] != ':')) continue;
+                char *num;
+                double v = strtod(e + 4, &num);
+                if (num != e + 4 && fabs(v) < 1e9) {
+                    pt.ele = (long)v;
+                    pt.has_ele = true;
+                }
                 break;
             }
-            gt++;
         }
-        if (*gt == '\0') break;                                 // unterminated tag
-        bool self_closing = gt > q && gt[-1] == '/';
+        add_point(t, pt);
+    }
+    if (skipped) fprintf(stderr, "Warning: %s: skipped %d point(s) with missing or invalid lat/lon\n", name, skipped);
+}
 
-        if (is_pt) {
-            GPXPoint point;
-            point.ele = 0.0;
-            point.has_ele = false;
-            point.rdp = true;
-            // A point without valid lat/lon (missing, non-numeric or out of
-            // range) must not silently become 0.0 (Null Island); skip it
-            bool valid = get_attr(q, gt, "lat", &point.lat) &&
-                         get_attr(q, gt, "lon", &point.lon) &&
-                         point.lat >= -90.0 && point.lat <= 90.0 &&
-                         point.lon >= -180.0 && point.lon <= 180.0;
-            if (!valid) {
-                skipped++;
-                p = gt + 1;
-                continue;
-            }
+// --------------------------------------------------------------- geometry
 
-            // Extract the ele(vation) data (if available and desired): walk the
-            // child tags of this element up to its closing tag, looking for <ele>.
-            // Bounded per point, so total parsing stays O(file size).
-            if (elevation && !self_closing) {
-                const char *c = gt + 1;
-                while ((c = strchr(c, '<')) != NULL) {
-                    const char *t = c + 1;
-                    if (*t == '/') {                            // closing tag
-                        const char *cn = t + 1;
-                        while (isalnum((unsigned char)*cn) || *cn == ':' || *cn == '_' || *cn == '-' || *cn == '.')
-                            cn++;
-                        const char *cl = memchr(t + 1, ':', cn - (t + 1));
-                        cl = (cl != NULL) ? cl + 1 : t + 1;
-                        if ((size_t)(cn - cl) == local_len && memcmp(cl, local, local_len) == 0)
-                            break;                              // closes this point element
-                        const char *e = strchr(t, '>');
-                        if (e == NULL) break;
-                        c = e;
-                        continue;
-                    }
-                    if (strncmp(t, "ele", 3) == 0 &&
-                        (t[3] == '>' || t[3] == '/' || isspace((unsigned char)t[3]))) {
-                        const char *content = strchr(t + 3, '>');
-                        const char *ele_end = strstr(t, "</ele>");
-                        if (content != NULL && ele_end != NULL && content < ele_end) {
-                            char buf[64];
-                            size_t n = (size_t)(ele_end - content - 1);
-                            if (n > sizeof(buf) - 1) n = sizeof(buf) - 1;
-                            memcpy(buf, content + 1, n);
-                            buf[n] = '\0';
-                            char *endptr;
-                            point.ele = strtod(buf, &endptr);
-                            point.has_ele = endptr != buf;
-                        }
-                        break;
-                    }
-                    const char *e = strchr(t, '>');
-                    if (e == NULL) break;
-                    c = e;
-                }
-            }
+// Offset in meters of b relative to a; k is cos(latitude) for the local scale
+static void offset(Point a, Point b, double k, double *dx, double *dy) {
+    *dx = (b.lon - a.lon) * k * MPERDEG;
+    *dy = (b.lat - a.lat) * MPERDEG;
+}
 
-            // Add the point to the dynamic array
-            if (*num_points == capacity) {
-                capacity = (capacity == 0) ? 1024 : capacity * 2;
-                *points = (GPXPoint*)realloc(*points, sizeof(GPXPoint) * capacity);
-                if (*points == NULL) {
-                    fprintf(stderr, "Error: Out of memory\n");
-                    exit(1);
-                }
-            }
-            (*points)[(*num_points)++] = point;
+static double dist(Point a, Point b) {
+    double dx, dy;
+    offset(a, b, cos(a.lat * PI / 180), &dx, &dy);
+    return hypot(dx, dy);
+}
+
+// Line a-b prepared once, so each point only costs a few multiplications
+typedef struct {
+    Point  a;
+    double k, bx, by, len;
+} Line;
+
+static Line line_init(Point a, Point b) {
+    Line l = {a, cos(a.lat * PI / 180), 0, 0, 0};
+    offset(a, b, l.k, &l.bx, &l.by);
+    l.len = hypot(l.bx, l.by);
+    return l;
+}
+
+// Perpendicular distance in meters of p to the line
+static double line_dist(const Line *l, Point p) {
+    double px, py;
+    offset(l->a, p, l->k, &px, &py);
+    return l->len == 0 ? hypot(px, py) : fabs(px * l->by - py * l->bx) / l->len;
+}
+
+// ---------------------------------------------------------------- filters
+
+// Drop points closer than `min` meters to the previously kept point
+static size_t remove_nearby(Point *p, size_t n, double min) {
+    size_t k = 1;
+    for (size_t i = 1; i < n - 1; i++)
+        if (dist(p[k - 1], p[i]) >= min) p[k++] = p[i];
+    if (n > 1) p[k++] = p[n - 1];
+    return k;
+}
+
+// Drop runs of 1-3 points that stick out more than `min` meters from the line
+// between the last kept point and the point after the run, and whose detour is
+// at least twice as long as that line (an out-and-back excursion)
+static size_t remove_spikes(Point *p, size_t n, double min) {
+    size_t k = 1;
+    for (size_t i = 1; i + 1 < n; ) {
+        size_t w, skip = 0;
+        // A point within `min` meters of the last kept point cannot stick out
+        // further than that (the lon scaling cos() <= 1 only overestimates)
+        if (hypot(p[i].lat - p[k - 1].lat, p[i].lon - p[k - 1].lon) * MPERDEG <= min) {
+            p[k++] = p[i++];
+            continue;
         }
-        p = gt + 1;
+        for (w = 1; w <= 3 && i + w < n && !skip; w++) {
+            Line l = line_init(p[k - 1], p[i + w]);
+            double path = 0, dev = HUGE_VAL;
+            Point prev = p[k - 1];
+            for (size_t j = i; j <= i + w; j++) {
+                path += dist(prev, p[j]);
+                prev = p[j];
+            }
+            for (size_t j = i; j < i + w; j++) dev = fmin(dev, line_dist(&l, p[j]));
+            if (dev > min && path >= 2 * dist(p[k - 1], p[i + w])) skip = w;
+        }
+        if (skip) i += skip;
+        else p[k++] = p[i++];
     }
+    if (n > 1) p[k++] = p[n - 1];
+    return k;
+}
 
-    if (skipped > 0) {
-        fprintf(stderr, "Warning: %s: skipped %d point(s) with missing or invalid lat/lon\n",
-                filename, skipped);
+// Ramer-Douglas-Peucker with an explicit stack; keep[] marks retained points
+static void rdp(const Point *p, size_t n, double eps, bool *keep) {
+    size_t (*stack)[2] = malloc(n * sizeof *stack);
+    if (!stack) die("out of memory", NULL);
+    size_t sp = 0;
+    keep[0] = keep[n - 1] = true;
+    stack[sp][0] = 0; stack[sp++][1] = n - 1;
+    while (sp) {
+        size_t a = stack[--sp][0], b = stack[sp][1], far = 0;
+        double dmax = 0;
+        Line l = line_init(p[a], p[b]);
+        for (size_t i = a + 1; i < b; i++) {
+            double d = line_dist(&l, p[i]);
+            if (d > dmax) { dmax = d; far = i; }
+        }
+        if (dmax <= eps) continue;
+        keep[far] = true;
+        stack[sp][0] = a;   stack[sp++][1] = far;
+        stack[sp][0] = far; stack[sp++][1] = b;
     }
+    free(stack);
+}
+
+// ----------------------------------------------------------------- output
+
+// Fixed decimals with trailing zeros removed (%g could emit exponents)
+static void print_num(FILE *fp, double v, int digits) {
+    char buf[64];
+    snprintf(buf, sizeof buf, "%.*f", digits, v);
+    char *dot = strchr(buf, '.');
+    if (dot) {
+        char *e = buf + strlen(buf) - 1;
+        while (*e == '0') *e-- = '\0';
+        if (*e == '.') *e = '\0';
+    }
+    if (!strcmp(buf, "-0")) strcpy(buf, "0");
+    fputs(buf, fp);
+}
+
+static char *out_name(const char *in, int index) {
+    size_t len = strlen(in) + 16;
+    char *s = malloc(len);
+    if (!s) die("out of memory", NULL);
+    if (index) snprintf(s, len, "%s%d.gpx", in, index);
+    else       snprintf(s, len, "%s.gpx", in);
+    return s;
+}
+
+static size_t write_gpx(const char *name, const Point *p, const bool *keep, size_t n,
+                        int digits, bool elevation, const char *header, long *bytes) {
+    FILE *fp = fopen(name, "wb");
+    if (!fp) die("could not write", name);
+    size_t kept = 0;
+    fputs(header, fp);
+    for (size_t i = 0; i < n; i++) {
+        if (!keep[i]) continue;
+        kept++;
+        fputs("<trkpt lat=\"", fp);
+        print_num(fp, p[i].lat, digits);
+        fputs("\" lon=\"", fp);
+        print_num(fp, p[i].lon, digits);
+        if (elevation && p[i].has_ele) {
+            fprintf(fp, "\"><ele>%ld</ele></trkpt>", p[i].ele);
+        } else {
+            fputs("\"/>", fp);
+        }
+    }
+    fputs(GPXFOOTER, fp);
+    *bytes = ftell(fp);
+    if (fclose(fp)) die("could not write", name);
+    return kept;
+}
+
+// Write every <trk>...</trk> to its own file, reusing the original header
+static void split_file(const char *name) {
+    char *xml = read_file(name, NULL);
+    const char *first = NULL;
+    int count = 0;
+    for (const char *p = xml; (p = strchr(p, '<')); ) {
+        const char *after = skip_special(p + 1);
+        if (after) { p = after; continue; }
+        if (strncmp(p, "<trk>", 5) && strncmp(p, "<trk ", 5)) { p++; continue; }
+        const char *end = strstr(p, "</trk>");
+        if (!end) break;
+        end += 6;
+        if (!first) first = p;
+        char *out = out_name(name, ++count);
+        FILE *fp = fopen(out, "wb");
+        if (!fp) die("could not write", out);
+        fwrite(xml, 1, first - xml, fp);
+        fwrite(p, 1, end - p, fp);
+        fputs("</gpx>", fp);
+        if (fclose(fp)) die("could not write", out);
+        free(out);
+        p = end;
+    }
+    if (!count) die("no <trk> found in", name);
     free(xml);
 }
 
-// Returns the distance between point a and b
-double distance(GPXPoint a, GPXPoint b) {
-    // lat,lon -> x,y
-    double lon_d_at_lat = cos(a.lat * M_PI / 180);
-    a.lon = a.lon * lon_d_at_lat;
-    b.lon = b.lon * lon_d_at_lat;
-    double lat = a.lat - b.lat;
-    double lon = a.lon - b.lon;
-    return sqrt(lat * lat + lon * lon);
-}
+int main(int argc, char *argv[]) {
+    int digits = DIGITS, opt;
+    bool elevation = true, quiet = false, split = false;
+    double eps = EPSILON, nearby = NEARBY, spike = SPIKE;
+    const char *header = GPXHEADER_FULL;
 
-// returns the perpendicular distance from p to the line between a and b
-double p_distance(GPXPoint p, GPXPoint a, GPXPoint b) {
-    // lat,lon -> x,y
-    double lon_d_at_lat = cos(p.lat * M_PI / 180);
-    p.lon = p.lon * lon_d_at_lat;
-    a.lon = a.lon * lon_d_at_lat;
-    b.lon = b.lon * lon_d_at_lat;
-    double dx = b.lat - a.lat;
-    double dy = b.lon - a.lon;
-    double d = sqrt(dx * dx + dy * dy);
-    if (d == 0.0) return 0.0;                               // degenerate segment (a == b)
-    return fabs(p.lat * dy - p.lon * dx + b.lat * a.lon - b.lon * a.lat)/d;
-}
-
-// Omit spike points
-void despike(GPXPoint *points, int n, double epsilon) {
-    for (int i = 0; i < n - 2; i++) {
-        double ab = distance(points[i], points[i + 1]);
-        double bc = distance(points[i + 1], points[i + 2]);
-        double ac = distance(points[i], points[i + 2]);
-        if (ac < ab || ac < bc) {
-            points[i + 1] = points[i];
-            continue;
-        }
-        double pd = p_distance(points[i + 1], points[i], points[i + 2]);
-        if (pd * epsilon > ac) {
-            points[i + 1] = points[i];
+    while ((opt = getopt(argc, argv, "d:ehmn:p:qs:t")) != -1) {
+        switch (opt) {
+        case 'd': digits = atoi(optarg);
+                  if (digits < 1 || digits > 9) die("invalid number of digits (1-9)", NULL);
+                  break;
+        case 'e': elevation = false; break;
+        case 'h': help(); return 0;
+        case 'm': header = GPXHEADER_MIN; break;
+        case 'n': nearby = atof(optarg);
+                  if (nearby < 0 || nearby > 100) die("invalid nearby value (0-100)", NULL);
+                  break;
+        case 'p': eps = atof(optarg);
+                  if (eps < 0 || eps > 100) die("invalid precision (0-100)", NULL);
+                  break;
+        case 'q': quiet = true; break;
+        case 's': spike = atof(optarg);
+                  if (spike < 0 || spike > 100) die("invalid spike value (0-100)", NULL);
+                  break;
+        case 't': split = true; break;
+        default:  return 1;
         }
     }
-}
+    if (optind == argc) { help(); return 0; }
 
-// Deduplicate nearby points
-void reduce_nearby(GPXPoint *points, int n, double epsilon) {
-    for (int i = 0; i < n - 1; i++) {
-        if (distance(points[i], points[i + 1]) < epsilon) {
-            points[i + 1] = points[i];
-        }
-    }
-}
-
-// Apply Ramer–Douglas–Peucker algorithm to reduce the number of trackpoints
-void rdp_simplify(GPXPoint *points, int n, double epsilon) {
-    int             index = 0;
-    double          dmax = 0.0;
-
-    for (int i = 1; i < n - 1; i++) {
-        double d = p_distance(points[i], points[0], points[n-1]);
-        if (d > dmax) {
-            index = i;
-            dmax = d;
-        }
-    }
-    if (dmax > epsilon) {
-        rdp_simplify(points, index + 1, epsilon);
-        rdp_simplify(points + index, n - index, epsilon);
-    } else {
-        for (int i = 1; i < n - 1; i++) {
-            points[i].rdp = false;                    // mark point for removal
-        }
-    }
-}
-
-// Write the reduced GPX file
-void writeGPXFile(const GPXPoint* points, int n, const char* filename, int digits, bool elevation, const char* gpxheader) {
-    FILE            *fp;
-
-    fp = fopen(filename, "w");
-    if (fp != NULL) {
-        fputs(gpxheader, fp);
-        for (int i = 0; i < n; ++i) {
-            if (points[i].rdp == true) {
-                if (elevation && points[i].has_ele) {
-                    fputs("<trkpt lat=\"", fp);
-                    print_coord(fp, points[i].lat, digits);
-                    fputs("\" lon=\"", fp);
-                    print_coord(fp, points[i].lon, digits);
-                    fputs("\"><ele>", fp);
-                    print_coord(fp, points[i].ele, digits);
-                    fputs("</ele></trkpt>", fp);
-                } else {
-                    fputs("<trkpt lat=\"", fp);
-                    print_coord(fp, points[i].lat, digits);
-                    fputs("\" lon=\"", fp);
-                    print_coord(fp, points[i].lon, digits);
-                    fputs("\"></trkpt>", fp);
-                }
-            }
-        }
-        fprintf(fp, GPXFOOTER);
-        fclose(fp);
-    } else {
-        fprintf(stderr, "Error: Could not write to file %s\n", filename);
-        exit(1);
-    }
-}
-
-
-int main(int argc, char *argv[]){
-    extern char     *optarg;
-    extern int      optind;
-    const char*     infilename;
-    int             param;
-    int             digits = DIGITS;
-    bool            elevation = ELEVATION;
-    double          epsilon = EPSILON;
-    const char*     gpxheader = GPXHEADER_FULL;
-    double          nearby = NEARBY;
-    bool            quiet = QUIET;
-    double          spike = SPIKE;
-    bool            split = false;
-
-    while ((param = getopt(argc, argv, "d:ehmn:p:qs:t")) != -1)
-    switch(param) {
-        case 'd':                                   // number of digits
-            digits = atoi(optarg) ;
-            if ((digits < 1) || (digits > 9)) {
-                fputs("Invalid number of digits\n", stderr);
-                help();
-                exit(1);
-            }
-            break;
-        case 'e':                                   // elevation
-            elevation = false;
-            break;
-        case 'h':                                   // help
-            help();
-            exit(0);
-        case 'm':                                   // use minimal <gpx>
-            gpxheader = GPXHEADER_MIN;
-            break;
-        case 'n':                                   // max error in meter
-            nearby = atof(optarg) ;
-            if ((nearby < 0) || (nearby > 100)) {
-                fputs("Invalid nearby value (0-100)\n", stderr);
-                help();
-                exit(1);
-            }
-            break;
-        case 'p':                                   // max error in meter
-            epsilon = atof(optarg) ;
-            if ((epsilon < 0) || (epsilon > 100)) {
-                fputs("Invalid precision (0-100)\n", stderr);
-                help();
-                exit(1);
-            }
-            break;
-        case 'q':
-            quiet = true;
-            break;
-        case 's':                                   // max error in meter
-            spike = atof(optarg) ;
-            if ((spike < 0) || (spike > 10)) {
-                fputs("Invalid spike factor (0-10)\n", stderr);
-                help();
-                exit(1);
-            }
-            break;
-        case 't':
-            split = true;
-            break;
-        case '?':
-            return 1;
-        default:
-            abort();
-    }
-
-    if (argv[optind] == NULL) {
-        help();
-        exit(0);
-    }
-
-    // meter / MPERLAT => degree
-    epsilon /= MPERLAT;
-    nearby /= MPERLAT;
-
-    // Loop over all GPX files
     for (int i = optind; i < argc; i++) {
-        GPXPoint*       points = NULL;
-        char*           outfilename;
-        struct          stat filestatus;
-        int             num_points = 0;
+        const char *in = argv[i];
+        if (split) { split_file(in); continue; }
 
-        infilename      = argv[i];
+        size_t len;
+        char *xml = read_file(in, &len);
+        Track t = {0};
+        parse_points(xml, &t, elevation, in);
+        free(xml);
+        if (!t.n) die("no rtept/trkpt found in", in);
+        size_t parsed = t.n;
 
-        // Parse GPX file, extracting lat, lon and ELEVATION
-        if (split) {
-            splitGPXFile(infilename);
-            break;
-        }
+        if (nearby > 0) t.n = remove_nearby(t.pts, t.n, nearby);
+        if (spike > 0)  t.n = remove_spikes(t.pts, t.n, spike);
 
-        // Parse GPX file, extracting lat, lon and ELEVATION
-        parseGPXFile(infilename, &points, &num_points, elevation);
+        bool *keep = calloc(t.n, 1);
+        if (!keep) die("out of memory", NULL);
+        rdp(t.pts, t.n, eps, keep);
 
-        // Omit nearby points
-        if (num_points == 0) {
-            fprintf(stderr, "Error: %s does not contain rtept/trkpt/trackpoints\n", infilename);
-            exit(1);
-        }
-
-        // Omit nearby points
-        if (nearby > 0.0) reduce_nearby(points, num_points, nearby);
-
-        // Omit spike points
-        if (spike > 0.0) despike(points, num_points, spike);
-
-        // First and last point can not be the same
-        while (num_points > 1 &&
-               points[0].lat == points[num_points-1].lat &&
-               points[0].lon == points[num_points-1].lon) {
-            num_points--;
-        }
-
-        // Simplify using RDP algorithm
-        rdp_simplify(points, num_points, epsilon);
-
-        // Write new simplified GPX file
-        outfilename = concat(infilename, ".gpx");
-        writeGPXFile(points, num_points, outfilename, digits, elevation, gpxheader);
-
-        // Print statistics
-        if (! quiet) {
-            int num_rdp_points = 0;
-            for (int rdp = 0; rdp <= num_points-1; rdp++) {
-                if (points[rdp].rdp) num_rdp_points++;
-            }
-            stat(infilename, &filestatus);
-            int insize = filestatus.st_size;
-            stat(outfilename, &filestatus);
-            int outsize = filestatus.st_size;
-            printf("%s => %s\n", infilename, outfilename);
-            printf("%8i => %8i (%.2f%%) trackpoints\n", num_points, num_rdp_points, num_rdp_points * 100.0 / num_points);
-            printf("%8i => %8i (%.2f%%) bytes\n", insize, outsize, outsize * 100.0 / insize);
-        }
-
-        free(outfilename);
-        free(points);
+        char *out = out_name(in, 0);
+        long outsize;
+        size_t kept = write_gpx(out, t.pts, keep, t.n, digits, elevation, header, &outsize);
+        if (!quiet)
+            printf("%s => %s\n%8zu => %8zu (%.2f%%) trackpoints\n%8zu => %8ld (%.2f%%) bytes\n",
+                   in, out, parsed, kept, kept * 100.0 / parsed, len, outsize, outsize * 100.0 / len);
+        free(out); free(keep); free(t.pts);
     }
+    return 0;
 }

@@ -15,7 +15,7 @@ sudo make install
 ### Usage
 
 ```
-gpxding version v0.9.0
+gpxding version v1.0.0
 Usage: gpxding [OPTIONS] [FILE ...]
   -d    number of digits (default 5)
   -e    omit elevation info
@@ -24,7 +24,7 @@ Usage: gpxding [OPTIONS] [FILE ...]
   -n    remove nearby points (default disabled)
   -p    precision in meters (default 2.0 m)
   -q    quiet
-  -s    remove spikes (default disabled)
+  -s    remove spikes in meters (default 0 m, disabled)
   -t    split gpx file into individual tracks
 ```
 
@@ -43,7 +43,7 @@ Cierp_Andorra_la_Vella.gpx => Cierp_Andorra_la_Vella.gpx.gpx
 * typically a GPX file will be reduced to about 10% of the original size, without losing relevant information for navigation
 * reduce the number of track points using Ramer-Douglas-Peucker algorithm
 * reduce longitude/latitude to a sensible amount of digits (preserving relevant precision), e.g. 14.9999997348 becomes 15.
-* keep elevation with decimal precision (or omit it completely with -e)
+* keep elevation in whole meters (or omit it completely with -e)
 * deduplicate nearby points, e.g. a recording wasn't stopped during a time-out
 * reducing noise/spikes
 * split multi track GPX files into multiple single track files
