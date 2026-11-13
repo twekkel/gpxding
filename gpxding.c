@@ -99,11 +99,50 @@ static char* readFile(const char* filename) {
     return buf;
 }
 
+// If q (just after '<') starts a comment, CDATA section, processing
+// instruction or DOCTYPE, return a pointer just past its terminator,
+// else NULL. CDATA ends at "]]>", so a '>' inside it is not mistaken
+// for the end of the section.
+static const char* skip_special(const char *q) {
+    if (strncmp(q, "!--", 3) == 0) {
+        const char *e = strstr(q, "-->");
+        return (e != NULL) ? e + 3 : q + strlen(q);
+    }
+    if (strncmp(q, "![CDATA[", 8) == 0) {
+        const char *e = strstr(q, "]]>");
+        return (e != NULL) ? e + 3 : q + strlen(q);
+    }
+    if (*q == '?' || *q == '!') {
+        const char *e = strchr(q, '>');
+        return (e != NULL) ? e + 1 : q + strlen(q);
+    }
+    return NULL;
+}
+
+// Find the next '<' followed by name (e.g. "trk>"), skipping comments and
+// CDATA sections so markup inside them is never matched
+static const char* next_tag(const char *p, const char *name) {
+    size_t name_len = strlen(name);
+    while ((p = strchr(p, '<')) != NULL) {
+        const char *q = p + 1;
+        const char *after = skip_special(q);
+        if (after != NULL) {
+            p = after;
+            continue;
+        }
+        if (strncmp(q, name, name_len) == 0) {
+            return p;
+        }
+        p = q;
+    }
+    return NULL;
+}
+
 // Split the GPX file in files with individual tracks
 static void splitGPXFile(const char* infilename) {
     char *file_contents = readFile(infilename);
     char *header_start = file_contents;
-    char *trk_start = strstr(file_contents, "<trk>");
+    const char *trk_start = next_tag(file_contents, "trk>");
 
     if (trk_start == NULL) {
         printf("No <trk> tag found in the GPX file.\n");
@@ -111,12 +150,12 @@ static void splitGPXFile(const char* infilename) {
         exit(1);
     }
 
-    char *header_end = trk_start;
+    const char *header_end = trk_start;
     int count = 1;
 
     // Find and split the individual tracks, <trk>...</trk>
     while (trk_start != NULL) {
-        char *trk_end = strstr(trk_start, "</trk>");
+        const char *trk_end = next_tag(trk_start, "/trk>");
         if (trk_end == NULL) {
             break;
         }
@@ -144,7 +183,7 @@ static void splitGPXFile(const char* infilename) {
         fclose(outfile);
         free(outfilename);
 
-        trk_start = strstr(trk_end, "<trk>");
+        trk_start = next_tag(trk_end, "trk>");
         count++;
     }
 
@@ -202,15 +241,10 @@ static void parseGPXFile(const char* filename, GPXPoint** points, int* num_point
     while ((p = strchr(p, '<')) != NULL) {
         const char *q = p + 1;
 
-        // Skip comments, processing instructions, CDATA and DOCTYPE
-        if (strncmp(q, "!--", 3) == 0) {
-            const char *e = strstr(q, "-->");
-            p = (e != NULL) ? e + 3 : q + strlen(q);
-            continue;
-        }
-        if (*q == '?' || *q == '!') {
-            const char *e = strchr(q, '>');
-            p = (e != NULL) ? e + 1 : q + strlen(q);
+        // Skip comments, CDATA, processing instructions and DOCTYPE
+        const char *after = skip_special(q);
+        if (after != NULL) {
+            p = after;
             continue;
         }
         if (*q == '/') {                                        // closing tag
