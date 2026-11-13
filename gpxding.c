@@ -355,7 +355,7 @@ void despike(GPXPoint *points, int n, double epsilon) {
 
 // Deduplicate nearby points
 void reduce_nearby(GPXPoint *points, int n, double epsilon) {
-    for (int i = 0; i < n - 2; i++) {
+    for (int i = 0; i < n - 1; i++) {
         if (distance(points[i], points[i + 1]) < epsilon) {
             points[i + 1] = points[i];
         }
