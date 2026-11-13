@@ -58,17 +58,19 @@ Usage: gpxding [OPTIONS] [FILE ...]\n\
     return;
 }
 
-// Lose the trailing zeros in combination with printf %.*g
-int num_digits(double a, int digits) {
-    int int_a = (int) abs(a);
-    if (int_a >= 100) {
-        digits += 3;
-    } else if (int_a >= 10) {
-        digits += 2;
-    } else if (int_a >= 1) {
-        digits += 1;
+// Print a coordinate with a fixed number of decimals, stripping trailing
+// zeros. %g is not used: it falls back to scientific notation for small
+// values (e.g. 1e-05), which is invalid in GPX (lat/lon are xsd:decimal)
+static void print_coord(FILE *fp, double v, int digits) {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%.*f", digits, v);
+    char *dot = strchr(buf, '.');
+    if (dot != NULL) {
+        char *e = buf + strlen(buf) - 1;
+        while (e > dot && *e == '0') *e-- = '\0';
+        if (*e == '.') *e = '\0';
     }
-    return digits;
+    fputs(buf, fp);
 }
 
 // Concatenate strings
@@ -423,14 +425,18 @@ void writeGPXFile(const GPXPoint* points, int n, const char* filename, int digit
         fputs(gpxheader, fp);
         for (int i = 0; i < n; ++i) {
             if (points[i].rdp == true) {
-                int lat_digits = num_digits(points[i].lat, digits);
-                int lon_digits = num_digits(points[i].lon, digits);
                 if (elevation && points[i].ele != NO_ELE) {
-                    fprintf(fp, "<trkpt lat=\"%.*g\" lon=\"%.*g\"><ele>%i</ele></trkpt>",
-                    lat_digits, points[i].lat, lon_digits, points[i].lon, points[i].ele);
+                    fputs("<trkpt lat=\"", fp);
+                    print_coord(fp, points[i].lat, digits);
+                    fputs("\" lon=\"", fp);
+                    print_coord(fp, points[i].lon, digits);
+                    fprintf(fp, "\"><ele>%i</ele></trkpt>", points[i].ele);
                 } else {
-                    fprintf(fp, "<trkpt lat=\"%.*g\" lon=\"%.*g\"></trkpt>",
-                    lat_digits, points[i].lat, lon_digits, points[i].lon);
+                    fputs("<trkpt lat=\"", fp);
+                    print_coord(fp, points[i].lat, digits);
+                    fputs("\" lon=\"", fp);
+                    print_coord(fp, points[i].lon, digits);
+                    fputs("\"></trkpt>", fp);
                 }
             }
         }
