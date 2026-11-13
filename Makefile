@@ -11,7 +11,7 @@ STRIP   ?= strip -s
 all: gpxding
 
 gpxding: gpxding.c
-	$(CC) $(CFLAGS) $(LDFLAGS) -o gpxding `xml2-config --cflags --libs` gpxding.c -lxml2 -lm
+	$(CC) $(CFLAGS) $(LDFLAGS) -o gpxding gpxding.c -lm
 
 install: all
 	$(STRIP) gpxding

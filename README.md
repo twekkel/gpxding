@@ -1,28 +1,10 @@
-Note for Ubuntu 25.10 (and probably others distributions)... when you get the error 'error while loading shared libraries: libxml2.so.2', use this workaround
-
-```sudo ln -sf /lib/x86_64-linux-gnu/libxml2.so.16 /lib/x86_64-linux-gnu/libxml2.so.2```
-
-===
-
-
 **gpxding** (_ding_ translates into _thing_ in English) is a utility to minify GPX files by removing redundant information. Only (a reduced number of) track points and elevation (optional) information is retained, while all other excess information is discarded. File size will be drastically reduced, while still accurate and useful for route navigation.
 
 The goal of **gpxding** is to have the smallest possible GPX file for route navigation.
 
 ### Installation
 
-#### Prerequisites
-
-Libxml2 is a required package for gpxding and installation depends on the OS, e.g.
-
-```
-sudo apt install libxml2-dev
-or
-sudo yum install libxml2-dev
-or
-...
-```
-
+gpxding has no dependencies beyond a C compiler and libm.
 
 #### Build
 ```
@@ -33,7 +15,7 @@ sudo make install
 ### Usage
 
 ```
-gpxding version v0.0.5
+gpxding version v0.9.0
 Usage: gpxding [OPTIONS] [FILE ...]
   -d    number of digits (default 5)
   -e    omit elevation info
@@ -61,7 +43,7 @@ Cierp_Andorra_la_Vella.gpx => Cierp_Andorra_la_Vella.gpx.gpx
 * typically a GPX file will be reduced to about 10% of the original size, without losing relevant information for navigation
 * reduce the number of track points using Ramer-Douglas-Peucker algorithm
 * reduce longitude/latitude to a sensible amount of digits (preserving relevant precision), e.g. 14.9999997348 becomes 15.
-* round elevation to the nearest meter (default) or omit it completely
+* keep elevation with decimal precision (or omit it completely with -e)
 * deduplicate nearby points, e.g. a recording wasn't stopped during a time-out
 * reducing noise/spikes
 * split multi track GPX files into multiple single track files
