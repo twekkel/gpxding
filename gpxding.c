@@ -1,6 +1,7 @@
+#include <ctype.h>
 #include <fcntl.h>
 #include <getopt.h>
-#include <libxml/parser.h>
+#include <limits.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -176,100 +177,169 @@ void splitGPXFile(const char* infilename) {
     close(fp);
 }
 
-// Read the GPX file
-xmlDocPtr readGPXFile(const char* filename) {
-    xmlDocPtr       doc;
+// Read the whole file into a NUL-terminated buffer
+static char* readFile(const char* filename) {
     FILE            *fp;
+    struct stat     file_stat;
+    char            *buf;
 
-    // Check if file can be opened for reading
-    if ((fp = fopen(filename, "r")) == NULL) {
+    if (stat(filename, &file_stat) == -1 || (fp = fopen(filename, "rb")) == NULL) {
         fprintf(stderr, "Error: Could not open file %s\n", filename);
         exit(1);
     }
-
-    // Initialize libxml2
-    xmlInitParser();
-
-    // Parse the GPX file
-    doc = xmlReadFile(filename, NULL, 0);
-
-    if (doc == NULL) {
-        fprintf(stderr, "Error: Could not parse GPX file %s\n", filename);
+    buf = malloc(file_stat.st_size + 1);
+    if (buf == NULL || fread(buf, 1, file_stat.st_size, fp) != (size_t)file_stat.st_size) {
+        fprintf(stderr, "Error: Could not read file %s\n", filename);
+        fclose(fp);
         exit(1);
     }
-
-    return doc;
+    buf[file_stat.st_size] = '\0';
+    fclose(fp);
+    return buf;
 }
 
-// Extract the lat,lon and elevation data
-void processNode(GPXPoint** points, xmlNodePtr pt_node, int* num_points, bool elevation) {
-    xmlChar*        content;
-    GPXPoint        point;
+// Extract a numeric attribute from the attribute list [attrs, attrs_end) of an
+// open tag. Handles arbitrary attribute order, whitespace around '=' and both
+// quote styles. The value is copied to a small buffer because strtod needs a
+// NUL-terminated string; 63 chars is far beyond double precision for a coordinate.
+static bool get_attr(const char* attrs, const char* attrs_end, const char* name, double* out) {
+    size_t          name_len = strlen(name);
 
-    point.lat = atof((const char*)xmlGetProp(pt_node, (const xmlChar*)"lat"));
-    point.lon = atof((const char*)xmlGetProp(pt_node, (const xmlChar*)"lon"));
-    point.ele = NO_ELE;
-    point.rdp = true;
+    while (attrs < attrs_end) {
+        while (attrs < attrs_end && isspace((unsigned char)*attrs)) attrs++;
+        if (attrs >= attrs_end) break;
+        const char *an = attrs;
+        while (attrs < attrs_end && *attrs != '=' && !isspace((unsigned char)*attrs)) attrs++;
+        size_t an_len = attrs - an;
+        while (attrs < attrs_end && isspace((unsigned char)*attrs)) attrs++;
+        if (attrs >= attrs_end || *attrs != '=') continue;      // attribute without value
+        attrs++;
+        while (attrs < attrs_end && isspace((unsigned char)*attrs)) attrs++;
+        if (attrs >= attrs_end || (*attrs != '"' && *attrs != '\'')) continue;
+        char quote = *attrs++;
+        const char *av = attrs;
+        while (attrs < attrs_end && *attrs != quote) attrs++;
+        if (an_len == name_len && memcmp(an, name, name_len) == 0) {
+            char buf[64];
+            size_t n = (size_t)(attrs - av);
+            if (n > sizeof(buf) - 1) n = sizeof(buf) - 1;
+            memcpy(buf, av, n);
+            buf[n] = '\0';
+            *out = strtod(buf, NULL);
+            return true;
+        }
+        if (attrs < attrs_end) attrs++;                         // skip closing quote
+    }
+    return false;
+}
 
-    // Extract the ele(vation) data (if available and desired)
-    if (elevation) {
-        xmlNodePtr ele_node = pt_node->children;
-        while (ele_node != NULL) {
-            if (xmlStrcmp(ele_node->name, (const xmlChar*)"ele") == 0) {
-                content = xmlNodeGetContent(ele_node);
-                point.ele = atoi((const char*)content);
-                xmlFree(content);
+// Parse the GPX file and extract the lat,lon and elevation data.
+// Single pass over the raw text: no XML library, just enough parsing for
+// trkpt/rtept tags. Not 100% XML compliant, but sufficient for real GPX files.
+static void parseGPXFile(const char* filename, GPXPoint** points, int* num_points, bool elevation) {
+    char            *xml = readFile(filename);
+    const char      *p = xml;
+    int             capacity = 0;
+
+    *points = NULL;
+    *num_points = 0;
+
+    while ((p = strchr(p, '<')) != NULL) {
+        const char *q = p + 1;
+
+        // Skip comments, processing instructions, CDATA and DOCTYPE
+        if (strncmp(q, "!--", 3) == 0) {
+            const char *e = strstr(q, "-->");
+            p = (e != NULL) ? e + 3 : q + strlen(q);
+            continue;
+        }
+        if (*q == '?' || *q == '!') {
+            const char *e = strchr(q, '>');
+            p = (e != NULL) ? e + 1 : q + strlen(q);
+            continue;
+        }
+        if (*q == '/') {                                        // closing tag
+            p = q + 1;
+            continue;
+        }
+
+        // Tag name, possibly namespace prefixed
+        const char *name = q;
+        while (*q != '\0' && (isalnum((unsigned char)*q) || *q == ':' || *q == '_' || *q == '-' || *q == '.'))
+            q++;
+        const char *colon = memchr(name, ':', q - name);
+        const char *local = (colon != NULL) ? colon + 1 : name;
+        size_t local_len = q - local;
+        bool is_pt = local_len == 5 &&
+                     (memcmp(local, "trkpt", 5) == 0 || memcmp(local, "rtept", 5) == 0);
+
+        // Find the end of the open tag, ignoring '>' inside quoted attribute values
+        const char *gt = q;
+        char quote = '\0';
+        while (*gt != '\0') {
+            if (quote != '\0') {
+                if (*gt == quote) quote = '\0';
+            } else if (*gt == '"' || *gt == '\'') {
+                quote = *gt;
+            } else if (*gt == '>') {
                 break;
             }
-            ele_node = ele_node->next;
+            gt++;
         }
-    }
+        if (*gt == '\0') break;                                 // unterminated tag
+        bool self_closing = gt > q && gt[-1] == '/';
 
-    // Add the point to the dynamic array
-    *points = (GPXPoint*)realloc(*points, sizeof(GPXPoint) * (*num_points + 1));
-    (*points)[*num_points] = point;
-    (*num_points)++;
-}
+        if (is_pt) {
+            GPXPoint point;
+            point.lat = 0.0;
+            point.lon = 0.0;
+            point.ele = NO_ELE;
+            point.rdp = true;
+            get_attr(q, gt, "lat", &point.lat);
+            get_attr(q, gt, "lon", &point.lon);
 
-// Parse the GPX file and extract the lat,lon and elevation data
-void parseGPXFile(const char* filename, GPXPoint** points, int* num_points, bool elevation) {
-    xmlDocPtr       doc;
-    xmlNodePtr      node, trk_node, trkseg_node, pt_node;
-
-    doc = readGPXFile(filename);
-
-    node = xmlDocGetRootElement(doc);
-
-    if (node == NULL) {
-        fprintf(stderr, "Error: Empty GPX file %s\n", filename);
-        xmlFreeDoc(doc);
-        exit(1);
-    }
-
-    // Find the track point nodes and extract the lat and lon data
-    *num_points = 0;
-    for (trk_node = node->children; trk_node != NULL; trk_node = trk_node->next) {
-        if (xmlStrcmp(trk_node->name, (const xmlChar*)"trk") == 0) {
-            for (trkseg_node = trk_node->children; trkseg_node != NULL; trkseg_node = trkseg_node->next) {
-                if (xmlStrcmp(trkseg_node->name, (const xmlChar*)"trkseg") == 0) {
-                    for (pt_node = trkseg_node->children; pt_node != NULL; pt_node = pt_node->next) {
-                        if (xmlStrcmp(pt_node->name, (const xmlChar*)"trkpt") == 0) {
-                            processNode(points, pt_node, num_points, elevation);
-                        }
+            // Extract the ele(vation) data (if available and desired), bounded
+            // by this element's closing tag or the next point tag
+            if (elevation && !self_closing) {
+                char close[64];
+                snprintf(close, sizeof(close), "</%.*s", (int)(q - name), name);
+                const char *seg_end = strstr(gt + 1, close);
+                const char *next_pt = strstr(gt + 1, "<trkpt");
+                const char *next_rte = strstr(gt + 1, "<rtept");
+                if (next_pt != NULL && (seg_end == NULL || next_pt < seg_end)) seg_end = next_pt;
+                if (next_rte != NULL && (seg_end == NULL || next_rte < seg_end)) seg_end = next_rte;
+                if (seg_end == NULL) seg_end = gt + strlen(gt);
+                const char *ele = strstr(gt + 1, "<ele");
+                if (ele != NULL && ele < seg_end &&
+                    (ele[4] == '>' || ele[4] == '/' || isspace((unsigned char)ele[4]))) {
+                    const char *content = strchr(ele + 4, '>');
+                    const char *ele_end = strstr(ele, "</ele>");
+                    if (content != NULL && ele_end != NULL && content < ele_end && ele_end < seg_end) {
+                        char buf[64];
+                        size_t n = (size_t)(ele_end - content - 1);
+                        if (n > sizeof(buf) - 1) n = sizeof(buf) - 1;
+                        memcpy(buf, content + 1, n);
+                        buf[n] = '\0';
+                        point.ele = atoi(buf);
                     }
                 }
             }
-        } else if (xmlStrcmp(trk_node->name, (const xmlChar*)"rte") == 0) {
-            for (pt_node = trk_node->children; pt_node != NULL; pt_node = pt_node->next) {
-                if (xmlStrcmp(pt_node->name, (const xmlChar*)"rtept") == 0) {
-                    processNode(points, pt_node, num_points, elevation);
+
+            // Add the point to the dynamic array
+            if (*num_points == capacity) {
+                capacity = (capacity == 0) ? 1024 : capacity * 2;
+                *points = (GPXPoint*)realloc(*points, sizeof(GPXPoint) * capacity);
+                if (*points == NULL) {
+                    fprintf(stderr, "Error: Out of memory\n");
+                    exit(1);
                 }
             }
+            (*points)[(*num_points)++] = point;
         }
+        p = gt + 1;
     }
 
-    xmlFreeDoc(doc);
-    xmlCleanupParser();
+    free(xml);
 }
 
 // Returns the distance between point a and b
