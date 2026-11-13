@@ -14,7 +14,7 @@
 #define M_PI            3.14159265358979323846
 #endif
 
-#define VERSION         "0.0.5"
+#define VERSION         "0.9.0"
 #define GPXHEADER_FULL  "<?xml version=\"1.0\" encoding=\"UTF-8\"?><gpx version=\"1.1\" creator=\"gpxding "VERSION"\" xmlns=\"http://www.topografix.com/GPX/1/1\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd\"><trk><trkseg>"
 #define GPXHEADER_MIN   "<gpx><trk><trkseg>"
 #define GPXFOOTER       "</trkseg></trk></gpx>"

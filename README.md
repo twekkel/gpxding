@@ -15,7 +15,7 @@ sudo make install
 ### Usage
 
 ```
-gpxding version v0.0.5
+gpxding version v0.9.0
 Usage: gpxding [OPTIONS] [FILE ...]
   -d    number of digits (default 5)
   -e    omit elevation info
