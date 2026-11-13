@@ -332,6 +332,7 @@ double p_distance(GPXPoint p, GPXPoint a, GPXPoint b) {
     double dx = b.lat - a.lat;
     double dy = b.lon - a.lon;
     double d = sqrt(dx * dx + dy * dy);
+    if (d == 0.0) return 0.0;                               // degenerate segment (a == b)
     return fabs(p.lat * dy - p.lon * dx + b.lat * a.lon - b.lon * a.lat)/d;
 }
 
